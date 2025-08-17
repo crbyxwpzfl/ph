@@ -24,8 +24,7 @@ uint16_t* messvals = nullptr;    //  Global pointer for dynamically allocated ar
 
 
 #include <EEPROM.h>    //  eeprom is non voletile so saved on powerloss and reset
-struct{ char ssid[30]; char pw[30]; uint16_t smoothness; float upperphref; float lowerphref; uint16_t upperanalogref; uint16_t loweranalogref; float phoffset; } eeprom;    //  fixed size for calibartion pairs since i dont know malloc
-
+struct{ char ssid[30]; char pw[30]; float upperphref; float lowerphref; uint16_t upperanalogref; uint16_t loweranalogref; float phoffset; } eeprom;    //  fixed size for calibartion pairs since i dont know malloc
 
 void calibrate(float upperref = 0.0, float lowerref = 0.0 ) {    //  overwrites referenc values and recalculates linear interpolation
   if (upperref) { eeprom.upperphref = upperref; eeprom.upperanalogref = mean; }    //  update upper reference
@@ -39,33 +38,28 @@ void parseserial(String str) {    //  for user to overwrite eeprom struct
   str.trim();
   if (str.startsWith("ssid ")) { String ssidStr = str.substring(5); ssidStr.toCharArray(eeprom.ssid, sizeof(eeprom.ssid)); }
   if (str.startsWith("pw ")) { String pwStr = str.substring(3); pwStr.toCharArray(eeprom.pw, sizeof(eeprom.pw)); }
-  if (str.startsWith("smoothness ")) { String smoothnessStr = str.substring(11); eeprom.smoothness = smoothnessStr.toInt(); initmess(); }    //  realloc messvals arry
   if (str.startsWith("upperphref ")) { String upperphrefStr = str.substring(11); calibrate( upperphrefStr.toFloat(), 0.0 ); }
   if (str.startsWith("lowerphref ")) { String lowerphrefStr = str.substring(11); calibrate( 0.0, lowerphrefStr.toFloat() ); }
   if (str.startsWith("phoffset ")) { String phoffsetStr = str.substring(9); eeprom.phoffset = phoffsetStr.toFloat(); }
   EEPROM.put(0, eeprom);    //  put updated values into eeprom
-  Serial.println("eeprom vals, " + String(eeprom.ssid) + ", " + String(eeprom.smoothness) + ", " + String(eeprom.upperanalogref) + ", " + String(eeprom.upperphref) + ", " + String(eeprom.loweranalogref) + ", " + String(eeprom.lowerphref));    //  echo eeprom DEBUG
+  Serial.println("eeprom vals, " + String(eeprom.ssid) + ", " + String(eeprom.upperanalogref) + ", " + String(eeprom.upperphref) + ", " + String(eeprom.loweranalogref) + ", " + String(eeprom.lowerphref));    //  echo eeprom DEBUG
 }
 
-void initmess() {    //  respwans and initialises messval array when smoothness is overwritten, smoothness is the count of messvals used for mean calculation
+void initmess() {    //  respwans and initialises mess pin
   analogReadResolution(14); // 10bit 1023, 12bit 4096, 14bit 16383
   pinMode(A0, INPUT);
   calibrate();    //  caluculate linear interpolation of reference values from eeprom
-  if (eeprom.smoothness > 0 && eeprom.smoothness < 500) {    //  allocate memory for the array based on smoothness
-    if (messvals != nullptr) delete[] messvals;    //  free previously allocated memory if any
-    messvals = new uint16_t[eeprom.smoothness];    //  dynamically allocate the array
-    for (int i=0; i<eeprom.smoothness; i++) { mess(); delay(10); }    //  prefill messvals array so ph is correct
-    Serial.println("success messvals smoothness " + String(eeprom.smoothness));
-  } else { Serial.println( String(eeprom.smoothness) + "smoothness not in range 0-500"); }
+
 }
 
-void mess() {    //  messure analog voltage and convert to ph with continous mean, smoothness is the count of messvals used for mean calculation
-  static uint16_t index = 0;    //  static uint16_t messvals[ eeprom.smoothness ] = {}; does not work cause messvals has to be dynamically alloc
+void mess() {    //  messure analog voltage and convert to ph with continous mean, 100 is the count of messvals used for mean calculation
+  static uint16_t index = 0;
+  static uint16_t messvals[100] = {};    // switch to fixed size array to simplify
   messvals[index] = analogRead(A0);    //  read one value into messvals
-  index = ++index%eeprom.smoothness;    //  increment index of messvals or reset index to 0
+  index = ++index%100;    //  increment index of messvals or reset index to 0
   mean = 0.0;    //  reset mean of readings and recalculate mean
-  for (int i=0; i<eeprom.smoothness; i++) mean += messvals[i];
-  mean /= (float)eeprom.smoothness;
+  for (int i=0; i<100; i++) mean += messvals[i];
+  mean /= (float)100;
   ph = (slope * mean ) + intercept + eeprom.phoffset;    //  convert mean of analog readings to ph
 }
 
@@ -95,10 +89,10 @@ void setup() {
    
   initmess();    //  allocates messvals and calibrates with eeprom values here to give wifi some time to start
 
-  mdns.begin(WiFi.localIP(), "arduino");    //  setup mdns for arduino.local
-  mdns.addServiceRecord("Arduino mDNS Webserver Example._http", 80, MDNSServiceTCP);
-  
-  Serial.println("success ssid " + String(WiFi.SSID()) + ", ip " + WiFi.localIP().toString() + " or arduino.local, rssi " + String(WiFi.RSSI()) + "dBm");    //  confirm wifi DEBUG
+  mdns.begin(WiFi.localIP(), "ph");    //  setup mdns for ph.local
+  mdns.addServiceRecord("Arduino mDNS ph Webserver._http", 80, MDNSServiceTCP);
+
+  Serial.println("success ssid " + String(WiFi.SSID()) + ", ip " + WiFi.localIP().toString() + " or ph.local, rssi " + String(WiFi.RSSI()) + "dBm");    //  confirm wifi DEBUG
 }
 
 void loop() {
@@ -147,78 +141,6 @@ void loop() {
           client.print("\}");
           break;
         }
-
-        if (currentLine.endsWith("GET /true")) {
-          //displaystate = true;
-          Serial.println("");
-          Serial.println("client wants diplay true");
-          client.println("HTTP/1.1 200 OK");
-          client.println("Content-Type: application/json");
-          client.println("Connection: close");
-          client.println();
-          client.print("\{\"ph\": ");
-          Serial.println(ph);
-          client.print(ph);
-          client.print(", ");
-          client.print("\"display\": ");
-          client.print(0); //client.print(displaystate);
-          client.print("\}");
-          break;
-        }
-
-        if (currentLine.endsWith("GET /get")) {
-          Serial.println("");
-          Serial.println("client wants data");
-          client.println("HTTP/1.1 200 OK");
-          client.println("Content-Type: application/json");
-          client.println("Connection: close");
-          client.println();
-          client.print("\{\"ph\": ");
-          client.print(ph);
-          Serial.println(ph);
-          client.print(", ");
-          client.print("\"display\": ");
-          client.print(0); //client.print(displaystate);
-          client.print("\}");
-          break;
-        }
-        
-        /*
-        if (currentLine.endsWith("ph")) {
-          currentLine.remove(0,5);
-          float knownph = currentLine.toFloat();
-          //addcalipair(knownph, volt);
-          //EEPROM.get(0, calipairs);
-          Serial.println("");
-          Serial.println("client wants to calibarate");
-          client.println("HTTP/1.1 200 OK");
-          client.println("Content-Type: application/json");
-          client.println("Connection: close");
-          client.println();
-          client.print("\{\"ph\": ");
-          client.print(ph);
-          client.print(", ");
-          client.print("\"display\": ");
-          client.print("nan");
-          client.print(", ");
-          client.print("\"slope\": ");
-          client.print(slope);
-          client.print(", ");
-          client.print("\"intercept\": ");
-          client.print(intercept);
-          client.print(", ");
-          client.print("\"calipairs\": ");
-          client.print("\[");
-          client.print("\["); client.print(calipairs[0].voltx); client.print(", "); client.print(calipairs[0].phy); client.print("\]"); client.print(", ");
-          client.print("\["); client.print(calipairs[1].voltx); client.print(", "); client.print(calipairs[1].phy); client.print("\]"); client.print(", ");
-          client.print("\["); client.print(calipairs[2].voltx); client.print(", "); client.print(calipairs[2].phy); client.print("\]"); client.print(", ");
-          client.print("\["); client.print(calipairs[3].voltx); client.print(", "); client.print(calipairs[3].phy); client.print("\]"); client.print(", ");
-          client.print("\["); client.print(calipairs[4].voltx); client.print(", "); client.print(calipairs[4].phy); client.print("\]");
-          client.print("\]");
-          client.print("\}");
-          break;
-        }
-        */
 
       }
     }
