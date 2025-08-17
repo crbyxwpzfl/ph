@@ -1,0 +1,169 @@
+
+The current page is working as a dummy front end for a pool ph controller. 
+It is hosted by an arduino wich controlls a pump and can meassure ph.
+The page works and all the current logic/functionality has to stay as is.
+The page will now be connected to the arduino.
+The page should display data from an Arduino to the user and send User Input to the Arduino. 
+The Arduino controls all the hardware and runs a simple web-server.
+
+The site should fetch stats in a set interval eg 1000ms from the Arduino. 
+The Arduino will respond to "GET /stats" with json like this:
+{
+"AutoMode": int,
+ "ph": float,
+ "tankL": float,
+ "mlper01ph": float,
+ "pumpactive": int
+}
+
+The Keys "AutoMode", "ph", "tankL" and their values mean the following:
+- "AutoMode" is the current mode and is for the mode switch. 0 means MANUAL mode and 1 means AUTO mode
+- "ph" is the current ph value and is for the ph field
+- "tankL" is the current Tank Level and is for the liters field
+
+The Key "mlper01ph" is the ml wich automatically get dispensed in AUTO mode. 
+This Key "mlper01ph" is Only for the ml field while in AUTO mode.
+
+The Key "pumpactive" is the current state of the pump and is for the water pistol emoji button. 
+This button only is clickable in MANUAL mode (already working).
+0 means the pump is stopped and the water pistol emoji button should be grey.
+1 means the pump is running and the water pistol emoji button should be coloured.
+
+While the user is inputing a number into any filed the site should not get stats.
+The site should simply stop getting /stats while the user is entering something.
+So that the user input does not get overwritten by the site.
+when the user finished inputing the site can resume getting /stats.
+
+The User Input should be handled as defined below.
+
+The ph and liters field are mode independent.
+When the user finished inputting a number into ph or liters field the value should be sent to the Arduino.
+- ph goes to /truephnow
+- liters goes to /tankLnow
+
+The ml field is mode dependent.
+In AUTO mode when the user finished inputting a number into the ml field the value should go to /mlper01phnow
+In MANUAL mode when the user finished inputting a number into the ml field he value should go to /pumpmlnow
+
+Please make sure to only send values other than 0 to the Arduino endpoints /mlper01phnow, /pumpmlnow, /truephnow, /tankLnow.
+when the user enters 0 the value should not be sent.
+
+The water pistol emoji button (only clickable in MANUAL mode) should go to /pumpactivenow
+
+The mode button is a bit more intracate and does multible things.
+
+Whenever the user enters MANUAL mode these things should happen:
+- mode 0 shoud be sent to /AutoModenow to notify the arduino about the mode change. (the arduino now stops the pump)
+- get /stats
+- the ml filed should be set to 00.0 (already implemented). and should not be set to "mlper01ph" of get /stats anymore.
+
+Whenever the user enters AUTO mode these things shoud happen:
+- 1 shoud be sent to /AutoModenow to notify the arduino about the mode change.
+- get /stats
+- the value for ml should be set to "mlper01ph" of get /stats from now on.
+
+(ofcourse still send 0 to these two endpoints /pumpactivenow, /AutoModenow these are binary values like off and on for the pump state and mode 0 MANUAL and 1 for AUTO)
+
+
+
+
+
+
+
+
+
+
+
+
+
+The current page is working as a dummy front end for a pool ph controller. 
+It is hosted by an arduino wich controlls a pump and can meassure ph.
+The page works and all the current logic/functionality has to stay as is.
+The page will now be connected to the arduino.
+The page should display data from an Arduino to the user and send User Input to the Arduino. 
+The Arduino controls all the hardware and runs a simple web-server.
+
+
+On first load the page should get the current mode from "GET /AUTOmode"
+The Arduino will responde with 1 for AUTO mode and 0 for MANUAL mode.
+
+
+The site should fetch stats in a set interval eg 1000ms from the Arduino.
+while in AUTO mode it shoudld "GET /AUTOstats"
+while in MANUAL mode it should "GET /MANUALstats"
+
+While the user is inputting anything into filed the page should stop fteching new data.
+When the user finished inputting into a filed the page should resume fteching either /AUTOstats or /MANUALstats depending on the current mode.
+
+The Arduino will respond to "GET /AUTOstats" with json like this:
+{
+ "ph": float,
+ "tankL": float,
+ "ml": float,
+ "pumpactive": int
+}
+
+Here the Keys "ph", "tankL", "ml", "pumpactive" and their values mean the following:
+- "ph" is the current ph value and is for the ph field
+- "tankL" is the current Tank Level and is for the liters field
+- "ml" are the ml wich get automatically pumped for a given ph offset
+- "pumpactive" is the state of the pump. 1 means the pump is active and 0 means the pump is stopped.
+
+
+The Arduino will respond to "GET /MANUALstats" with json like this:
+{
+ "ph": float,
+ "tankL": float,
+ "ml": float,
+ "pumpactive": int
+}
+
+Here the Keys "ph", "tankL", "ml", "pumpactive" and their values mean the following:
+- "ph" is the current ph value and is for the ph field
+- "tankL" is the current Tank Level and is for the liters field
+- "ml" are the ml wich get automatically pumped for a given ph offset
+- "pumpactive" is the state of the pump. 1 means the pump is active and 0 means the pump is stopped.
+
+
+The Key "mlper01ph" is the ml wich automatically get dispensed in AUTO mode. 
+This Key "mlper01ph" is Only for the ml field while in AUTO mode.
+
+The Key "pumpactive" is the current state of the pump and is for the water pistol emoji button. 
+This button only is clickable in MANUAL mode (already working).
+0 means the pump is stopped and the water pistol emoji button should be grey.
+1 means the pump is running and the water pistol emoji button should be coloured.
+
+While the user is inputing a number into any filed the site should not get stats.
+The site should simply stop getting /stats while the user is entering something.
+So that the user input does not get overwritten by the site.
+when the user finished inputing the site can resume getting /stats.
+
+The User Input should be handled as defined below.
+
+The ph and liters field are mode independent.
+When the user finished inputting a number into ph or liters field the value should be sent to the Arduino.
+- ph goes to /truephnow
+- liters goes to /tankLnow
+
+The ml field is mode dependent.
+In AUTO mode when the user finished inputting a number into the ml field the value should go to /mlper01phnow
+In MANUAL mode when the user finished inputting a number into the ml field he value should go to /pumpmlnow
+
+Please make sure to only send values other than 0 to the Arduino endpoints /mlper01phnow, /pumpmlnow, /truephnow, /tankLnow.
+when the user enters 0 the value should not be sent.
+
+The water pistol emoji button (only clickable in MANUAL mode) should go to /pumpactivenow
+
+The mode button is a bit more intracate and does multible things.
+
+Whenever the user enters MANUAL mode these things should happen:
+- mode 0 shoud be sent to /AutoModenow to notify the arduino about the mode change. (the arduino now stops the pump)
+- get /stats
+- the ml filed should be set to 00.0 (already implemented). and should not be set to "mlper01ph" of get /stats anymore.
+
+Whenever the user enters AUTO mode these things shoud happen:
+- 1 shoud be sent to /AutoModenow to notify the arduino about the mode change.
+- get /stats
+- the value for ml should be set to "mlper01ph" of get /stats from now on.
+
+(ofcourse still send 0 to these two endpoints /pumpactivenow, /AutoModenow these are binary values like off and on for the pump state and mode 0 MANUAL and 1 for AUTO)

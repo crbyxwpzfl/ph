@@ -38,11 +38,11 @@ void calibrate(float upperref = 0.0, float lowerref = 0.0 ) {    //  overwrites 
 
 void parseserial(String str) {    //  for user to overwrite eeprom struct
   str.trim();
-  if (str.startsWith("ssid ")) { String ssidStr = str.substring(5); ssidStr.toCharArray(eeprom.ssid, sizeof(eeprom.ssid)); }
-  if (str.startsWith("pw ")) { String pwStr = str.substring(3); pwStr.toCharArray(eeprom.pw, sizeof(eeprom.pw)); }
+  if (str.startsWith("ssid "))       { String ssidStr       = str.substring(5);  ssidStr.toCharArray(eeprom.ssid, sizeof(eeprom.ssid)); }
+  if (str.startsWith("pw "))         { String pwStr         = str.substring(3);  pwStr.toCharArray(eeprom.pw, sizeof(eeprom.pw)); }
   if (str.startsWith("upperphref ")) { String upperphrefStr = str.substring(11); calibrate( upperphrefStr.toFloat(), 0.0 ); }
   if (str.startsWith("lowerphref ")) { String lowerphrefStr = str.substring(11); calibrate( 0.0, lowerphrefStr.toFloat() ); }
-  if (str.startsWith("phoffset ")) { String phoffsetStr = str.substring(9); eeprom.phoffset = phoffsetStr.toFloat(); }
+  if (str.startsWith("phoffset "))   { String phoffsetStr   = str.substring(9);  eeprom.phoffset = phoffsetStr.toFloat(); }
   EEPROM.put(0, eeprom);    //  put updated values into eeprom
   Serial.println("eeprom vals, " + String(eeprom.ssid) + ", " + String(eeprom.upperanalogref) + ", " + String(eeprom.upperphref) + ", " + String(eeprom.loweranalogref) + ", " + String(eeprom.lowerphref));    //  echo eeprom DEBUG
 }
@@ -85,7 +85,7 @@ void setup() {
   
   
   analogReadResolution(14); // 10bit 1023, 12bit 4096, 14bit 16383
-  pinMode(A0, INPUT);
+  pinMode(A0, INPUT);    //  A0 is ph value pin
   calibrate();    //  calibrates with eeprom values here to give wifi some time to start this caluculate linear interpolation of reference values from eeprom
 
   mdns.begin(WiFi.localIP(), "ph");    //  setup mdns for ph.local
@@ -99,7 +99,7 @@ void loop() {
 
   if (Serial.available() > 0) parseserial(Serial.readString());    //  let user change eeprom via serial for debugging
 
-  mess();    //  update ph every loop only in Auto mode TODO
+  mess();    //  update ph every loop
 
   WiFiClient client = server.available();  // listen for incoming clients
   if (client) {
