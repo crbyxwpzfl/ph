@@ -26,6 +26,7 @@ uint16_t* messvals = nullptr;    //  Global pointer for dynamically allocated ar
 #include <EEPROM.h>    //  eeprom is non voletile so saved on powerloss and reset
 struct{ char ssid[30]; char pw[30]; float upperphref; float lowerphref; uint16_t upperanalogref; uint16_t loweranalogref; float phoffset; } eeprom;    //  fixed size for calibartion pairs since i dont know malloc
 
+
 void calibrate(float upperref = 0.0, float lowerref = 0.0 ) {    //  overwrites referenc values and recalculates linear interpolation
   if (upperref) { eeprom.upperphref = upperref; eeprom.upperanalogref = mean; }    //  update upper reference
   if (lowerref) { eeprom.lowerphref = lowerref; eeprom.loweranalogref = mean; }    // update lower reference
@@ -33,6 +34,7 @@ void calibrate(float upperref = 0.0, float lowerref = 0.0 ) {    //  overwrites 
   intercept = (float)eeprom.upperphref - slope * eeprom.upperanalogref;
   Serial.println("success calibrated slope " + String(slope, 10) + ", intercept " + String(intercept));    //  echo calibration DEBUG
 }
+
 
 void parseserial(String str) {    //  for user to overwrite eeprom struct
   str.trim();
@@ -45,12 +47,6 @@ void parseserial(String str) {    //  for user to overwrite eeprom struct
   Serial.println("eeprom vals, " + String(eeprom.ssid) + ", " + String(eeprom.upperanalogref) + ", " + String(eeprom.upperphref) + ", " + String(eeprom.loweranalogref) + ", " + String(eeprom.lowerphref));    //  echo eeprom DEBUG
 }
 
-void initmess() {    //  respwans and initialises mess pin
-  analogReadResolution(14); // 10bit 1023, 12bit 4096, 14bit 16383
-  pinMode(A0, INPUT);
-  calibrate();    //  caluculate linear interpolation of reference values from eeprom
-
-}
 
 void mess() {    //  messure analog voltage and convert to ph with continous mean, 100 is the count of messvals used for mean calculation
   static uint16_t index = 0;
@@ -86,8 +82,11 @@ void setup() {
     if (Serial.available() > 0) parseserial(Serial.readString());    //  let user change eeprom via serial while waiting for wifi
   }
   server.begin();
-   
-  initmess();    //  allocates messvals and calibrates with eeprom values here to give wifi some time to start
+  
+  
+  analogReadResolution(14); // 10bit 1023, 12bit 4096, 14bit 16383
+  pinMode(A0, INPUT);
+  calibrate();    //  calibrates with eeprom values here to give wifi some time to start this caluculate linear interpolation of reference values from eeprom
 
   mdns.begin(WiFi.localIP(), "ph");    //  setup mdns for ph.local
   mdns.addServiceRecord("Arduino mDNS ph Webserver._http", 80, MDNSServiceTCP);
