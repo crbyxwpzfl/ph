@@ -1,3 +1,7 @@
+const char ph_html[] = R"rawliteral(
+HTTP/1.1 200 OK
+Content-Type: text/html
+Connection: close
 
 <!DOCTYPE html>
 <html lang="en">
@@ -344,3 +348,4 @@
   </script>
 </body>
 </html>
+)rawliteral";
