@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Mode Toggle TEST</title>
+  <style>
+    /* Prevent Mobile Safari from auto‑resizing text */
+    html {
+      -webkit-text-size-adjust: 100%;
+      -ms-text-size-adjust: 100%;
+    }
+    body {
+      position: relative;
+      text-align: center;
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+    /* i icon in top‑right */
+    #info-icon {
+      position: absolute;
+      top: 0px;
+      left: 50%;
+      transform: translate(170px, -40px);
+      font-size: 2.5rem;
+      font-weight: 1000;
+      cursor: pointer;
+      user-select: none;
+    }
+    /* when info mode is active */
+    body.show-info .number-input,
+    body.show-info .unit {
+      display: none;
+    }
+    body.show-info .info-text {
+      display: inline-block;
+      margin-left: 10px;
+      font-size: 1.5rem;
+      font-weight: 1000;
+      color: #333;
+      text-align: left;
+    }
+
+    .mode {
+      margin-top: 70px;
+      display: flex;
+      flex-direction: row;
+      justify-content: center;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+    }
+    .mode span {
+      transition: all 0.3s ease;
+    }
+    .active {
+      font-size: 4.5rem;
+      font-weight: bold;
+    }
+    .inactive {
+      font-size: 0.8rem;
+      font-weight: 300;
+    }
+    .item {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin: 10px 0;
+      font-size: 1.0rem;
+    }
+    #icon {
+      margin-right: 10px;
+      font-size: 5.5rem;
+    }
+    .pump-button {
+      background: none;
+      border: none;
+      padding: 0;
+      margin-right: 10px;
+      font-size: 5.5rem;
+      cursor: pointer;
+      user-select: none;
+    }
+    .number-input {
+      /* Force the same look everywhere */
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      appearance: none;
+      border: 0;
+      border-radius: 4px;
+      text-align: center;
+      font-size: 6rem;
+      line-height: 1;        /* normalize line‑height */
+      height: 6.0rem;        /* fix height to match font-size */
+      width: 12.5rem;
+      padding: 0;            /* remove any default padding */
+      margin: 0;             /* remove any default margin */
+      outline: none;
+    }
+    .unit {
+      font-size: 1.5rem;
+      transform: translate(0px, 20px);
+    }
+    .info-text {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <!-- i icon trigger -->
+  <span id="info-icon">i</span>
+
+  <div class="mode" onclick="toggleMode()">
+    <span id="auto" class="active">AUTO</span>
+    <span id="manual" class="inactive">MANUAL</span>
+  </div>
+  <br/><br/>
+
+  <div class="item">
+    <span id="icon">🔬</span>
+    <span class="info-text">Current ph<br>Tripple Tap to &emsp; &emsp;<br>calibrate</span>
+    <input
+      id="ph"
+      class="number-input"
+      type="text"
+      inputmode="numeric"
+      pattern="[0-9]*"
+      data-z="2"
+      data-v="1"
+      readonly
+    />
+    <span class="unit">ph</span>
+  </div>
+
+  <div class="item">
+    <span id="icon">⛽</span>
+    <span class="info-text">Tank Level&nbsp;<br>Tripple Tap to&emsp;&emsp;<br>set fill level</span>
+    <input
+      id="liters"
+      class="number-input"
+      type="text"
+      inputmode="numeric"
+      pattern="[0-9]*"
+      data-z="1"
+      data-v="2"
+      readonly
+    />
+    <span class="unit">L</span>
+  </div>
+
+  <div class="item">
+    <button id="pump-button" class="pump-button">🔫</button>
+    <!-- <span class="info-text">In AUTO Tripple<br> Tap to set ml/0.1ph<br>In MANUAL Single</span> -->
+    <span class="info-text">ml to pump&emsp;&emsp;&emsp;&nbsp;&nbsp;<br> </span>
+    <input
+      id="ml"
+      class="number-input"
+      type="text"
+      inputmode="numeric"
+      pattern="[0-9]*"
+      data-z="2"
+      data-v="1"
+      readonly
+    />
+    <span class="unit">ml</span>
+  </div>
+
+  <script>
+    function formatValue(n, z, v) {
+      const maxDigits = z + v;
+      const s = String(n).padStart(maxDigits, '0');
+      return v > 0 ? s.slice(0, z) + '.' + s.slice(z) : s.slice(0, z);
+    }
+
+    function toggleMode() {
+      const auto = document.getElementById('auto');
+      const manual = document.getElementById('manual');
+      if (auto.classList.contains('active')) {
+        auto.className = 'inactive';
+        manual.className = 'active';
+      } else {
+        auto.className = 'active';
+        manual.className = 'inactive';
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const auto = document.getElementById('auto');
+      const mlInput = document.getElementById('ml');
+      const pumpBtn = document.getElementById('pump-button');
+      const inputs = Array.from(document.querySelectorAll('.number-input'));
+
+      let mlAutoRaw = 0;
+      let pumpMlRaw = 0;
+
+      function updateInputs() {
+        const isAuto = auto.classList.contains('active');
+        inputs.forEach(input => {
+          const holdRequired = !(input.id === 'ml' && !isAuto);
+          input.dataset.holdRequired = holdRequired;
+          input.readOnly = holdRequired;
+        });
+      }
+
+      function updatePumpBtnState() {
+        const isAuto = auto.classList.contains('active');
+        if (isAuto) {
+          pumpBtn.disabled = true;
+          pumpBtn.style.filter = 'none';
+          mlInput.value = formatValue(mlAutoRaw, 2, 1);
+        } else {
+          pumpBtn.disabled = false;
+          pumpBtn.style.filter = 'grayscale(100%)';
+          pumpMlRaw = 0;
+          mlInput.value = formatValue(pumpMlRaw, 2, 1);
+        }
+      }
+
+      // Info-icon click event to toggle info text
+      const infoIcon = document.getElementById('info-icon');
+      infoIcon.addEventListener('click', (e) => {
+        e.stopPropagation();
+        document.body.classList.toggle('show-info');
+      });
+
+      document.addEventListener('click', (e) => {
+        if (!e.target.matches('#info-icon') && document.body.classList.contains('show-info')) {
+          document.body.classList.remove('show-info');
+        }
+        if (!e.target.matches('.number-input')) {
+          inputs.forEach((input) => input.blur());
+        }
+      });
+
+      inputs.forEach(input => {
+        const z = Math.max(0, parseInt(input.dataset.z, 10) || 0);
+        const v = Math.max(0, parseInt(input.dataset.v, 10) || 0);
+        const maxDigits = z + v;
+        const maxRaw = 10 ** maxDigits - 1;
+
+        let raw = 0;
+        let originalRaw = raw;
+        let tapCount = 0, tapTimer;
+
+        function updateDisplay() {
+          input.value = formatValue(raw, z, v);
+          const L = input.value.length;
+          input.setSelectionRange(L, L);
+        }
+        updateDisplay();
+
+        input.addEventListener('keydown', e => {
+          if (input.readOnly) { e.preventDefault(); return; }
+          const k = e.key;
+          if (/\d/.test(k)) {
+            e.preventDefault();
+            raw = raw * 10 + Number(k);
+            if (raw > maxRaw) raw = Math.floor(raw / 10);
+            updateDisplay();
+          } else if (k === 'Backspace') {
+            e.preventDefault();
+            raw = Math.floor(raw / 10);
+            updateDisplay();
+          } else {
+            e.preventDefault();
+          }
+        });
+
+        ['mouseup','touchend'].forEach(evt => {
+          input.addEventListener(evt, e => {
+            if (input.id === 'ml' && input.dataset.holdRequired === 'false') {
+              e.preventDefault();
+              originalRaw = raw;
+              raw = 0;
+              updateDisplay();
+              input.focus();
+              return;
+            }
+            if (input.dataset.holdRequired === 'true') {
+              e.preventDefault();
+              tapCount++;
+              if (tapCount === 1) {
+                originalRaw = raw;
+                tapTimer = setTimeout(() => tapCount = 0, 600);
+              }
+              if (tapCount === 3) {
+                clearTimeout(tapTimer);
+                tapCount = 0;
+                raw = 0;
+                updateDisplay();
+                input.readOnly = false;
+                input.focus();
+              }
+            }
+          });
+        });
+
+        input.addEventListener('blur', () => {
+          if (raw === 0) {
+            if (input.id === 'ml') {
+              if (auto.classList.contains('active')) {
+                raw = mlAutoRaw;
+              } else {
+                raw = pumpMlRaw;
+              }
+            } else {
+              raw = originalRaw;
+            }
+            updateDisplay();
+          } else if (input.id === 'ml') {
+            if (auto.classList.contains('active')) {
+              mlAutoRaw = raw;
+            } else {
+              pumpMlRaw = raw;
+            }
+          }
+          if (input.dataset.holdRequired === 'true') {
+            input.readOnly = true;
+          }
+        });
+      });
+
+      pumpBtn.addEventListener('click', () => {
+        if (!pumpBtn.disabled) {
+          pumpBtn.style.filter =
+            pumpBtn.style.filter === 'grayscale(100%)'
+              ? 'none'
+              : 'grayscale(100%)';
+        }
+      });
+
+      const origToggle = window.toggleMode;
+      window.toggleMode = () => {
+        origToggle();
+        updateInputs();
+        updatePumpBtnState();
+      };
+
+      updateInputs();
+      updatePumpBtnState();
+    });
+  </script>
+</body>
+</html>
