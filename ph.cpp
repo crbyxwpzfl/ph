@@ -16,6 +16,7 @@ WiFiUDP udp;
 MDNS mdns(udp);
 WiFiServer server(80);
 
+uint8_t AUTOmode = 0;
 float ph = 0.0;    //  set in mess()
 float mean = 0.0;    //  set in mess()
 float slope = 0.0;    //  set in calibrate()
@@ -72,15 +73,18 @@ void setup() {
   if (fv < WIFI_FIRMWARE_LATEST_VERSION) {
     Serial.println("Please upgrade the firmware");
   }
+
   uint32_t lastloop = 0;    //  attempt to connect to wifi
-  while (status != WL_CONNECTED){
-    if(millis() > lastloop+10000){    //  retry wifi every 10sec
+  while (status != WL_CONNECTED) {    //  try wifi max 4 times
+    if (millis() > lastloop + 10000) {    //  retry wifi every 10sec
       lastloop = millis();
-      Serial.println( "try ssid " + String(eeprom.ssid) );
+      Serial.println("try ssid " + String(eeprom.ssid));
       status = WiFi.begin(eeprom.ssid, eeprom.pw);    //  Connect to WPA/WPA2 network. Change this line if using open or WEP network
     }
+    Serial.println("wifi failed check creds");
     if (Serial.available() > 0) parseserial(Serial.readString());    //  let user change eeprom via serial while waiting for wifi
   }
+
   server.begin();
   
   
@@ -124,10 +128,20 @@ void loop() {
           currentLine += c;      // add it to the end of the currentLine
         }
         
-        if (currentLine.endsWith("GET /false")) {
-          //displaystate = false;
+        if (currentLine.endsWith("GET /AUTOmode")) {    //  aswer with current mode
           Serial.println("");
-          Serial.println("client wants diplay false");
+          Serial.println("client wants AUTOmode answering with " + String(AUTOmode));
+          client.println("HTTP/1.1 200 OK");
+          client.println("Content-Type: text/plain");
+          client.println("Connection: close");
+          client.println();
+          client.print(AUTOmode);
+          break;
+        }
+
+        if (currentLine.endsWith("GET /AUTOstats")) {    //  aswer with json for AUTOstats
+          Serial.println("");
+          Serial.println("client wants AUTOstats");
           client.println("HTTP/1.1 200 OK");
           client.println("Content-Type: application/json");
           client.println("Connection: close");
@@ -135,9 +149,19 @@ void loop() {
           client.print("\{\"ph\": ");
           client.print(ph);
           client.print(", ");
-          client.print("\"display\": ");
-          client.print(0); //client.print(displaystate);
+          ...
           client.print("\}");
+          break;
+        }
+
+        if (currentLine.endsWith("GET /MANUALstats")) {    //  aswer with json for MANUALstats
+          Serial.println("");
+          Serial.println("client wants MANUALstats");
+          client.println("HTTP/1.1 200 OK");
+          client.println("Content-Type: application/json");
+          client.println("Connection: close");
+          client.println();
+          client.print(AUTOmode);
           break;
         }
 

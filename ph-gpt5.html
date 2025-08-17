@@ -1,7 +1,3 @@
-const char ph_html[] = R"rawliteral(
-HTTP/1.1 200 OK
-Content-Type: text/html
-Connection: close
 
 <!DOCTYPE html>
 <html lang="en">
@@ -171,76 +167,126 @@ Connection: close
   </div>
 
   <script>
+  // ===== Configuration =====
+  const POLL_INTERVAL_MS = 1000; // stats polling interval
+
     function formatValue(n, z, v) {
       const maxDigits = z + v;
       const s = String(n).padStart(maxDigits, '0');
       return v > 0 ? s.slice(0, z) + '.' + s.slice(z) : s.slice(0, z);
     }
 
-    // Helper: send a simple GET to endpoint with optional value as query param 'v'
-    // Assumption: Arduino accepts queries like /ENDPOINT?v=VALUE. If your device expects different format, we can adjust.
-    function sendGet(endpoint, value) {
-      const url = value === undefined ? endpoint : `${endpoint}?v=${encodeURIComponent(value)}`;
-      fetch(url).catch(() => { /* swallow errors silently */ });
-    }
-
-    // Poll /AUTOmode every 1s until we get a valid response '0' or '1'. Resolves with number 0/1.
-    function fetchAutoModeUntilRespond() {
-      return new Promise((resolve) => {
-        const tryFetch = async () => {
-          try {
-            const r = await fetch('/AUTOmode');
-            if (!r.ok) return false;
-            const txt = (await r.text()).trim();
-            if (txt === '0' || txt === '1') {
-              resolve(Number(txt));
-              return true;
-            }
-          } catch (e) {
-            // ignore and retry
-          }
-          return false;
-        };
-        // immediate try, then every 1s until success
-        (async function loop() {
-          const ok = await tryFetch();
-          if (!ok) setTimeout(loop, 1000);
-        })();
-      });
-    }
-
-    document.addEventListener('DOMContentLoaded', async () => {
-      // Elements used early
+    function toggleMode() {
       const auto = document.getElementById('auto');
       const manual = document.getElementById('manual');
-      const infoIcon = document.getElementById('info-icon');
-
-      // show info toggle (safe to register now)
-      infoIcon.addEventListener('click', (e) => {
-        e.stopPropagation();
-        document.body.classList.toggle('show-info');
-      });
-
-      // Block continuation until Arduino tells us current mode
-      const initialMode = await fetchAutoModeUntilRespond();
-      // apply mode to UI
-      if (initialMode === 1) {
-        auto.className = 'active';
-        manual.className = 'inactive';
-      } else {
+      if (auto.classList.contains('active')) {
         auto.className = 'inactive';
         manual.className = 'active';
+      } else {
+        auto.className = 'active';
+        manual.className = 'inactive';
       }
+    }
 
-      // Now initialize the original UI logic and wire network behaviour
+    document.addEventListener('DOMContentLoaded', () => {
+      const auto = document.getElementById('auto');
       const mlInput = document.getElementById('ml');
       const pumpBtn = document.getElementById('pump-button');
       const inputs = Array.from(document.querySelectorAll('.number-input'));
 
+      // Polling control
+      let pollTimer = null;
+      let isEditing = false; // true while user actively editing a field
+      let lastPumpActive = 0; // track pump state from stats
+
+      function startPolling(immediate=false) {
+        if (pollTimer) return; // already polling
+        if (immediate) fetchStats();
+        pollTimer = setInterval(fetchStats, POLL_INTERVAL_MS);
+      }
+      function stopPolling() {
+        if (pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+      }
+
+      function currentModeIsAuto() {
+        return auto.classList.contains('active');
+      }
+
+      function endpointForStats() {
+        return currentModeIsAuto() ? '/AUTOstats' : '/MANUALstats';
+      }
+
+      // Helper to set input raw value (integer) respecting each input closure
+      function setInputRaw(id, floatVal) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const v = Math.max(0, parseInt(el.dataset.v, 10) || 0);
+        const rawInt = Math.round(floatVal * (10 ** v));
+        if (typeof el._setRaw === 'function') {
+          el._setRaw(rawInt);
+        } else { // fallback
+          const z = Math.max(0, parseInt(el.dataset.z, 10) || 0);
+          el.value = formatValue(rawInt, z, v);
+        }
+      }
+
+      function applyStats(stats) {
+        // Only update if not editing
+        if (isEditing) return;
+        if (typeof stats.ph === 'number') setInputRaw('ph', stats.ph);
+        if (typeof stats.tankL === 'number') setInputRaw('liters', stats.tankL);
+        if (typeof stats.ml === 'number') setInputRaw('ml', stats.ml);
+        if (typeof stats.pumpactive !== 'undefined') {
+          lastPumpActive = stats.pumpactive ? 1 : 0;
+          pumpBtn.style.filter = lastPumpActive ? 'none' : 'grayscale(100%)';
+        }
+      }
+
+      async function fetchStats() {
+        if (isEditing) return; // safety
+        const url = endpointForStats();
+        try {
+          const resp = await fetch(url, { cache: 'no-store' });
+          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          const data = await resp.json();
+          applyStats(data);
+        } catch (e) {
+          console.error('Stats fetch failed', url, e);
+        }
+      }
+
+      // Initial mode fetch from Arduino
+      async function fetchInitialMode() {
+        try {
+          const resp = await fetch('/AUTOmode', { cache: 'no-store' });
+          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          const txt = (await resp.text()).trim();
+          const isAuto = txt === '1';
+          if (isAuto !== currentModeIsAuto()) {
+            // switch visual state to match device
+            if (isAuto) {
+              auto.className = 'active';
+              document.getElementById('manual').className = 'inactive';
+            } else {
+              auto.className = 'inactive';
+              document.getElementById('manual').className = 'active';
+            }
+            updateInputs();
+            updatePumpBtnState();
+          }
+        } catch (e) {
+          console.error('Initial mode fetch failed', e);
+        } finally {
+          // Start polling regardless
+          startPolling(true);
+        }
+      }
+
       let mlAutoRaw = 0;
       let pumpMlRaw = 0;
-      let statsInterval = null;
-      let fetchPaused = false; // paused while user edits
 
       function updateInputs() {
         const isAuto = auto.classList.contains('active');
@@ -251,84 +297,28 @@ Connection: close
         });
       }
 
-      function applyPumpActiveVisual(active) {
-        pumpBtn.style.filter = active ? 'none' : 'grayscale(100%)';
-      }
-
       function updatePumpBtnState() {
         const isAuto = auto.classList.contains('active');
         if (isAuto) {
           pumpBtn.disabled = true;
-          applyPumpActiveVisual(false);
+          // style (color/gray) will be set by stats; keep last state
+          pumpBtn.style.filter = lastPumpActive ? 'none' : 'grayscale(100%)';
           mlInput.value = formatValue(mlAutoRaw, 2, 1);
         } else {
           pumpBtn.disabled = false;
-          applyPumpActiveVisual(false);
+          pumpBtn.style.filter = lastPumpActive ? 'none' : 'grayscale(100%)';
           pumpMlRaw = 0;
           mlInput.value = formatValue(pumpMlRaw, 2, 1);
         }
       }
 
-      // Stats polling: GET /AUTOstats or /MANUALstats every 1000ms
-      async function fetchStatsOnce() {
-        if (fetchPaused) return;
-        const isAuto = auto.classList.contains('active');
-        const url = isAuto ? '/AUTOstats' : '/MANUALstats';
-        try {
-          const res = await fetch(url);
-          if (!res.ok) return;
-          const data = await res.json();
-          // Update fields only when not focused (we also pause while focus)
-          const phInput = document.getElementById('ph');
-          const litersInput = document.getElementById('liters');
-          // Update ph
-          if (document.activeElement !== phInput) {
-            const v = Math.max(0, parseInt(phInput.dataset.v, 10) || 0);
-            const z = Math.max(0, parseInt(phInput.dataset.z, 10) || 0);
-            const raw = Math.round((Number(data.ph) || 0) * Math.pow(10, v));
-            phInput.value = formatValue(raw, z, v);
-          }
-          // Update liters
-          if (document.activeElement !== litersInput) {
-            const v = Math.max(0, parseInt(litersInput.dataset.v, 10) || 0);
-            const z = Math.max(0, parseInt(litersInput.dataset.z, 10) || 0);
-            const raw = Math.round((Number(data.tankL) || 0) * Math.pow(10, v));
-            litersInput.value = formatValue(raw, z, v);
-          }
-          // Update ml
-          if (document.activeElement !== mlInput) {
-            const v = Math.max(0, parseInt(mlInput.dataset.v, 10) || 0);
-            const z = Math.max(0, parseInt(mlInput.dataset.z, 10) || 0);
-            const raw = Math.round((Number(data.ml) || 0) * Math.pow(10, v));
-            if (auto.classList.contains('active')) {
-              mlAutoRaw = raw;
-            } else {
-              pumpMlRaw = raw;
-            }
-            mlInput.value = formatValue(raw, z, v);
-          }
-          // pumpactive visual
-          applyPumpActiveVisual(Number(data.pumpactive) === 1);
-        } catch (e) {
-          // ignore errors and wait for next tick
-        }
-      }
+      // Info-icon click event to toggle info text
+      const infoIcon = document.getElementById('info-icon');
+      infoIcon.addEventListener('click', (e) => {
+        e.stopPropagation();
+        document.body.classList.toggle('show-info');
+      });
 
-      function startStatsInterval() {
-        if (statsInterval) clearInterval(statsInterval);
-        statsInterval = setInterval(fetchStatsOnce, 1000);
-        // do an immediate fetch as well
-        fetchStatsOnce();
-      }
-
-      function stopStatsInterval() {
-        if (statsInterval) {
-          clearInterval(statsInterval);
-          statsInterval = null;
-        }
-      }
-
-      // global click handler for hiding info and blurring inputs
       document.addEventListener('click', (e) => {
         if (!e.target.matches('#info-icon') && document.body.classList.contains('show-info')) {
           document.body.classList.remove('show-info');
@@ -338,7 +328,6 @@ Connection: close
         }
       });
 
-      // Manage each input behaviour and wire sending on blur
       inputs.forEach(input => {
         const z = Math.max(0, parseInt(input.dataset.z, 10) || 0);
         const v = Math.max(0, parseInt(input.dataset.v, 10) || 0);
@@ -352,14 +341,17 @@ Connection: close
         function updateDisplay() {
           input.value = formatValue(raw, z, v);
           const L = input.value.length;
-          try { input.setSelectionRange(L, L); } catch (e) { /* ignore */ }
+          input.setSelectionRange(L, L);
+          input.dataset.raw = String(raw);
         }
         updateDisplay();
 
-        input.addEventListener('focus', () => {
-          fetchPaused = true;
-          stopStatsInterval();
-        });
+        // Expose a setter for polling updates
+        input._setRaw = (newRaw) => {
+          raw = Math.max(0, Math.min(maxRaw, newRaw || 0));
+          originalRaw = raw;
+          updateDisplay();
+        };
 
         input.addEventListener('keydown', e => {
           if (input.readOnly) { e.preventDefault(); return; }
@@ -386,6 +378,8 @@ Connection: close
               raw = 0;
               updateDisplay();
               input.focus();
+              isEditing = true;
+              stopPolling();
               return;
             }
             if (input.dataset.holdRequired === 'true') {
@@ -402,13 +396,14 @@ Connection: close
                 updateDisplay();
                 input.readOnly = false;
                 input.focus();
+                isEditing = true;
+                stopPolling();
               }
             }
           });
         });
 
         input.addEventListener('blur', () => {
-          // compute final raw and update model variables
           if (raw === 0) {
             if (input.id === 'ml') {
               if (auto.classList.contains('active')) {
@@ -431,59 +426,55 @@ Connection: close
             input.readOnly = true;
           }
 
-          // send non-zero values to Arduino on blur
-          const intRaw = Number(raw) || 0;
-          if (intRaw !== 0) {
-            const floatVal = intRaw / Math.pow(10, v);
-            if (input.id === 'ph') {
-              sendGet('/truephnow', floatVal);
-            } else if (input.id === 'liters') {
-              sendGet('/tankL', floatVal);
-            } else if (input.id === 'ml') {
-              if (auto.classList.contains('active')) {
-                sendGet('/mlper01ph', floatVal);
-              } else {
-                sendGet('/pumpmlnow', floatVal);
-              }
+          // Send user input to Arduino if non-zero
+          const isAutoMode = currentModeIsAuto();
+            // Convert raw back to float
+          const floatVal = raw / (10 ** v);
+          if (raw !== 0) {
+            let endpoint = null;
+            if (input.id === 'ph') endpoint = '/truephnow';
+            else if (input.id === 'liters') endpoint = '/tankL';
+            else if (input.id === 'ml') endpoint = isAutoMode ? '/mlper01ph' : '/pumpmlnow';
+            if (endpoint) {
+              fetch(`${endpoint}?value=${encodeURIComponent(floatVal)}`).catch(err => console.error('Send failed', endpoint, err));
             }
           }
-
-          // resume stats polling after user finished editing
-          fetchPaused = false;
-          startStatsInterval();
+          isEditing = false;
+          startPolling();
         });
       });
 
-      // pump button behaviour: in MANUAL mode send /pumpactivenow
       pumpBtn.addEventListener('click', () => {
         if (!pumpBtn.disabled) {
-          // toggle visual
-          const nowGray = pumpBtn.style.filter === 'grayscale(100%)';
-          applyPumpActiveVisual(nowGray);
-          // send active state to arduino (1 = active, 0 = stopped)
-          const state = nowGray ? 1 : 0;
-          sendGet('/pumpactivenow', state);
+          const nowActive = pumpBtn.style.filter === 'grayscale(100%)';
+          pumpBtn.style.filter = nowActive ? 'none' : 'grayscale(100%)';
+          lastPumpActive = nowActive ? 1 : 0;
+          // Send pump active state in MANUAL mode
+          if (!currentModeIsAuto()) {
+            fetch(`/pumpactivenow?value=${nowActive ? 1 : 0}`).catch(err => console.error('Pump toggle send failed', err));
+          }
         }
       });
 
-      // wrap original toggleMode to also notify Arduino and update UI
       const origToggle = window.toggleMode;
       window.toggleMode = () => {
         origToggle();
         updateInputs();
         updatePumpBtnState();
-        // notify Arduino of new mode (1 = AUTO, 0 = MANUAL)
-        const isAuto = document.getElementById('auto').classList.contains('active');
-        sendGet('/AUTOmodenow', isAuto ? 1 : 0);
+        // Notify Arduino about mode change
+        const isAutoMode = currentModeIsAuto();
+        fetch(`/AUTOmodenow?value=${isAutoMode ? 1 : 0}`).catch(err => console.error('Mode change send failed', err));
+        // Restart polling immediately with new endpoint
+        if (!isEditing) {
+          stopPolling();
+          startPolling(true);
+        }
       };
 
-      // Start initial UI state and stats polling
       updateInputs();
       updatePumpBtnState();
-      startStatsInterval();
+      fetchInitialMode();
     });
   </script>
 </body>
 </html>
-
-)rawliteral";
