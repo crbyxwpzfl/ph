@@ -81,7 +81,7 @@ void setup() {
       Serial.println("try ssid " + String(eeprom.ssid));
       status = WiFi.begin(eeprom.ssid, eeprom.pw);    //  Connect to WPA/WPA2 network. Change this line if using open or WEP network
     }
-    Serial.println("wifi failed check creds");
+    if (millis() > lastloop + 10000) Serial.print(".");
     if (Serial.available() > 0) parseserial(Serial.readString());    //  let user change eeprom via serial while waiting for wifi
   }
 
@@ -108,8 +108,8 @@ void loop() {
   WiFiClient client = server.available();  // listen for incoming clients
   if (client) {
     String currentLine = "";                // make a String to hold incoming data from the client
-    Serial.println("new client");
-    boolean currentLineIsBlank = true;  // an HTTP request ends with a blank line
+    //Serial.println("new client");
+    //boolean currentLineIsBlank = true;  // an HTTP request ends with a blank line
     while (client.connected()) {
       if (client.available()) {
         char c = client.read();
@@ -117,9 +117,8 @@ void loop() {
         if (c == '\n') {
           if (currentLine.length() == 0) {
             //if (c == '\n' && currentLineIsBlank) {
-            Serial.println("");
-            Serial.println("client wants page");
             client.print(ph_html);    // serve html
+            Serial.println("sent page");
             break;
           } else {    // if you got a newline, then clear currentLine:
             currentLine = "";
@@ -127,10 +126,8 @@ void loop() {
         } else if (c != '\r') {  // if you got anything else but a carriage return character,
           currentLine += c;      // add it to the end of the currentLine
         }
-        
+
         if (currentLine.endsWith("GET /AUTOmode")) {    //  aswer with current mode
-          Serial.println("");
-          Serial.println("client wants AUTOmode answering with " + String(AUTOmode));
           client.println("HTTP/1.1 200 OK");
           client.println("Content-Type: text/plain");
           client.println("Connection: close");
@@ -140,29 +137,42 @@ void loop() {
         }
 
         if (currentLine.endsWith("GET /AUTOstats")) {    //  aswer with json for AUTOstats
-          Serial.println("");
-          Serial.println("client wants AUTOstats");
+          float ph = 11.1;
+          float tankL = 2.22;
+          float Automl = 44.4;
+          uint8_t pumpactive = 0;
+          String payload =  String("{\"ph\": ")         + String(ph, 2)
+                         + String(", \"tankL\": ")      + String(tankL, 2)
+                         + String(", \"ml\": ")         + String(Automl, 2)
+                         + String(", \"pumpactive\": ") + String(pumpactive)
+                         + String("}");
           client.println("HTTP/1.1 200 OK");
           client.println("Content-Type: application/json");
+          client.print("Content-Length: ");
+          client.println(payload.length());
           client.println("Connection: close");
           client.println();
-          client.print("\{\"ph\": ");
-          client.print(ph);
-          client.print(", ");
-          ...
-          client.print("\}");
+          client.print(payload);
           break;
         }
 
         if (currentLine.endsWith("GET /MANUALstats")) {    //  aswer with json for MANUALstats
-          Serial.println("");
-          Serial.println("client wants MANUALstats");
+          float ph = 11.1;
+          float tankL = 2.22;
+          float Manualml = 44.4;
+          uint8_t pumpactive = 0;
+          String payload =  String("{\"ph\": ")         + String(ph, 2)
+                         + String(", \"tankL\": ")      + String(tankL, 2)
+                         + String(", \"ml\": ")         + String(Manualml, 2)
+                         + String(", \"pumpactive\": ") + String(pumpactive)
+                         + String("}");
           client.println("HTTP/1.1 200 OK");
           client.println("Content-Type: application/json");
+          client.print("Content-Length: ");
+          client.println(payload.length());
           client.println("Connection: close");
           client.println();
-          client.print(AUTOmode);
-          break;
+          client.print(payload);
         }
 
       }
