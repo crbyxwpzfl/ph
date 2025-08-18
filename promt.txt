@@ -196,3 +196,92 @@ Whenever the user enters AUTO mode these things shoud happen:
 - the value for ml should be set to "mlper01ph" of get /stats from now on.
 
 (ofcourse still send 0 to these two endpoints /pumpactivenow, /AutoModenow these are binary values like off and on for the pump state and mode 0 MANUAL and 1 for AUTO)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+----------- NEWEST VERSION mode only sent indyrectly via stats querry
+
+
+
+
+The current page is working as a dummy front end for a pool ph controller. 
+It is hosted by an arduino wich controlls a pump and can meassure ph.
+The page works and all the current logic/functionality has to stay as is.
+The page will now be connected to the arduino.
+The page should display data from an Arduino to the user and send User Input to the Arduino. 
+
+
+On first load the page should get the current mode from "GET /AUTOmode"
+The Arduino will responde with 1 for AUTO mode and 0 for MANUAL mode.
+The page should retrie GET /AUTOmode every second until the arudino responds.
+The site should continur Only after the arduino responded.
+
+
+The site should fetch stats in a set interval eg 1000ms from the Arduino.
+while in AUTO mode it shoudld "GET /AUTOstats"
+while in MANUAL mode it should "GET /MANUALstats"
+
+While the user is inputting anything into filed the page should stop fteching new data.
+When the user finished inputting into a filed the page should resume fteching either /AUTOstats or /MANUALstats depending on the current mode.
+
+
+The Arduino will respond to "GET /AUTOstats" with json like this:
+{
+ "ph": float,
+ "tankL": float,
+ "ml": float,
+ "pumpactive": int
+}
+
+Here the Keys "ph", "tankL", "ml", "pumpactive" and their values mean the following:
+- "ph" is the current ph value and is for the ph field
+- "tankL" is the current Tank Level and is for the liters field
+- "ml" is for the ml field and are the ml wich get automatically pumped for a given ph offset
+- "pumpactive" is the state of the pump. While in AUTO mode this is not a button (already implemented).
+  1 means the pump is active and the water pistol emoji should be colourd.
+  0 means the pump is stopped and the water pistol emoji should be greyscale.
+
+
+The Arduino will respond to "GET /MANUALstats" with json like this:
+{
+ "ph": float,
+ "tankL": float,
+ "ml": float,
+ "pumpactive": int
+}
+
+Here the Keys "ph", "tankL", "ml", "pumpactive" and their values mean the following:
+- "ph" is the current ph value and is for the ph field
+- "tankL" is the current Tank Level and is for the liters field
+- "ml" is for the ml field and are the ml wich are left to pump of a user input
+- "pumpactive" is the state of the pump. While in MANUAL mode this is a button (already implemented).
+  1 means the pump is active and the water pistol emoji button should be colourd.
+  0 means the pump is stopped and the water pistol emoji button should be greyscale.
+
+
+User input while in AUTO mode should be sent to these endpoints.
+- ph filed is for endpoint "/trueph". only non 0 values should be sent to the arduino
+- liters field is for endpoint "/tankL". only non 0 values should be sent to the arduino
+- ml filed is for endpoint "/Automl". only non 0 values should be sent to the arudino
+( the water pistol emoji button is not clickable in AUTO mode. this already is working )
+
+User input into the following fields while in MANUAL mode should be sent to these endpoints.
+- ph filed is for endpoint /trueph. only non 0 values should be sent to the arduino
+- liters field is for endpoint /tankL. only non 0 values should be sent to the arduino
+- ml filed is for endpoint /Manualml. only non 0 values should be sent to the arudino
+- the water pistol emoji button is clickable in MANUAL mode (this already is working).
+  When the water pistol emoji button turns off/grey this should send a to endpoint "/pumpdinactive".
+  When the water pistol emoji button turns on/is coulored this should send to enpoint "/pumpactive".
+
+
