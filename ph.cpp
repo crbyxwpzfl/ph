@@ -42,12 +42,12 @@ struct{ char ssid[30];
         float phoffset;    //  constant ph offset
       } eeprom;
 
-void calibrateph(float upperref = 0.0, float lowerref = 0.0 ) {    //  overwrites referenc values and recalculates linear interpolation
+String calibrateph(float upperref = 0.0, float lowerref = 0.0 ) {    //  overwrites referenc values and recalculates linear interpolation
   if (upperref) { eeprom.upperphref = upperref; eeprom.upperanalogref = mean; }    //  update upper reference
   if (lowerref) { eeprom.lowerphref = lowerref; eeprom.loweranalogref = mean; }    // update lower reference
   slope = (eeprom.upperphref - eeprom.lowerphref) / (float)(eeprom.upperanalogref - eeprom.loweranalogref);
   intercept = (float)eeprom.upperphref - slope * eeprom.upperanalogref;
-  Serial.println("success calibrated slope " + String(slope, 10) + ", intercept " + String(intercept));    //  echo calibration DEBUG
+  return("ph calibration " + String(slope, 10) + ", intercept " + String(intercept));    //  echo calibration DEBUG
 }
 
 void calibratepump(){
@@ -88,38 +88,42 @@ void mess() {    //  messure analog voltage and convert to ph with continous mea
 void setup() {
   Serial.begin(115200);    //  Serial.setTimeout(10);
   EEPROM.get(0, eeprom);    //  fetch current eeprom values and since eeprom is a global struct this updates the global struct
-  
+
+
   if (WiFi.status() == WL_NO_MODULE) {      //  check for the WiFi module and verison
-    Serial.println("Communication with WiFi module failed!");
+    Serial.println("communication with wifi module failed so stop here");
     while (true);    // don't continue
   }
   String fv = WiFi.firmwareVersion();
   if (fv < WIFI_FIRMWARE_LATEST_VERSION) {
-    Serial.println("Please upgrade the firmware");
+    Serial.println("please upgrade the firmware");
   }
 
-  uint32_t lastloop = 0;    //  attempt to connect to wifi
+  Serial.println("init wifi ");
+  uint32_t lastwifitry = 0, lastdot = 0;    //  attempt to connect to wifi
   while (status != WL_CONNECTED) {    //  try wifi max 4 times
-    if (millis() > lastloop + 10000) {    //  retry wifi every 10sec
-      lastloop = millis();
-      Serial.println("try ssid " + String(eeprom.ssid));
+    if (millis() > lastwifitry + 10000) {    //  retry wifi every 10sec
+      lastwifitry = millis();
+      Serial.print("try ssid " + String(eeprom.ssid));
       status = WiFi.begin(eeprom.ssid, eeprom.pw);    //  Connect to WPA/WPA2 network. Change this line if using open or WEP network
     }
-    if (millis() > lastloop + 10000) Serial.print(".");
+    if (millis() > lastdot + 1000) Serial.print(".");
     if (Serial.available() > 0) parseserial(Serial.readString());    //  let user change eeprom via serial while waiting for wifi
   }
+  Serial.println("success" + "rssi " + String(WiFi.RSSI()) + "dBm");
 
   server.begin();
-  
-  
+  Serial.println("webserver is up");
+
+
   analogReadResolution(14); // 10bit 1023, 12bit 4096, 14bit 16383
   pinMode(A0, INPUT);    //  A0 is ph value pin
-  calibrateph();    //  calibrates with eeprom values here to give wifi some time to start this caluculate linear interpolation of reference values from eeprom
+  Serial.println(calibrateph());    //  calibrates with eeprom values here to give wifi some time to start this caluculate linear interpolation of reference values from eeprom
+
 
   mdns.begin(WiFi.localIP(), "ph");    //  setup mdns for ph.local
-  mdns.addServiceRecord("Arduino mDNS ph Webserver._http", 80, MDNSServiceTCP);
-
-  Serial.println("success ssid " + String(WiFi.SSID()) + ", ip " + WiFi.localIP().toString() + " or ph.local, rssi " + String(WiFi.RSSI()) + "dBm");    //  confirm wifi DEBUG
+  mdns.addServiceRecord("arduino mDNS ph webserver._http", 80, MDNSServiceTCP);
+  Serial.println("mdns is up so ph.local  goes to " + WiFi.localIP().toString());    //  confirm wifi DEBUG
 }
 
 void loop() {
@@ -132,8 +136,6 @@ void loop() {
   WiFiClient client = server.available();  // listen for incoming clients
   if (client) {
     String currentLine = "";                // make a String to hold incoming data from the client
-    //Serial.println("new client");
-    //boolean currentLineIsBlank = true;  // an HTTP request ends with a blank line
     while (client.connected()) {
       if (client.available()) {
         char c = client.read();
@@ -201,7 +203,6 @@ void loop() {
             client.println("Connection: close");
             client.println();
             client.println("recieved overwrite " + query);
-            Serial.println("recieved overwrite " + query);
             if (query.startsWith("speed")) Serial.println("speed overwrite");
             break;
           }
