@@ -16,8 +16,9 @@ WiFiUDP udp;
 MDNS mdns(udp);
 WiFiServer server(80);
 
-uint8_t AUTOmode = 0;
 float ph = 0.0;    //  set in mess()
+float Manualml = 0.0;
+
 float mean = 0.0;    //  set in mess()
 float slope = 0.0;    //  set in calibrate()
 float intercept = 0.0;    //  set in calibrate()
@@ -25,10 +26,23 @@ uint16_t* messvals = nullptr;    //  Global pointer for dynamically allocated ar
 
 
 #include <EEPROM.h>    //  eeprom is non voletile so saved on powerloss and reset
-struct{ char ssid[30]; char pw[30]; float upperphref; float lowerphref; uint16_t upperanalogref; uint16_t loweranalogref; float phoffset; } eeprom;    //  fixed size for calibartion pairs since i dont know malloc
+struct{ char ssid[30];
+        char pw[30];
+        uint8_t AUTOmode;    // is auto mode on or off
+        float tankL;    //  tank level in liters
+        float Autophsetpoint;    //  ph set point
+        float Automl;    //  amount in ml to pump for 0.1 ph diff
+        float Autodeadzone;    //  minimal ph diff to pump sth
+        uint16_t speed;    //  motor speed
+        float pumpref;    //  pump reference
+        float upperphref;    // upper ph calibaration point
+        float lowerphref;    // lower ph calibaration point
+        uint16_t upperanalogref;    // corosponding analog reading
+        uint16_t loweranalogref;    // corosponding analog reading
+        float phoffset;    //  constant ph offset
+      } eeprom;
 
-
-void calibrate(float upperref = 0.0, float lowerref = 0.0 ) {    //  overwrites referenc values and recalculates linear interpolation
+void calibrateph(float upperref = 0.0, float lowerref = 0.0 ) {    //  overwrites referenc values and recalculates linear interpolation
   if (upperref) { eeprom.upperphref = upperref; eeprom.upperanalogref = mean; }    //  update upper reference
   if (lowerref) { eeprom.lowerphref = lowerref; eeprom.loweranalogref = mean; }    // update lower reference
   slope = (eeprom.upperphref - eeprom.lowerphref) / (float)(eeprom.upperanalogref - eeprom.loweranalogref);
@@ -36,14 +50,24 @@ void calibrate(float upperref = 0.0, float lowerref = 0.0 ) {    //  overwrites 
   Serial.println("success calibrated slope " + String(slope, 10) + ", intercept " + String(intercept));    //  echo calibration DEBUG
 }
 
+void calibratepump(){
+
+}
 
 void parseserial(String str) {    //  for user to overwrite eeprom struct
   str.trim();
   if (str.startsWith("ssid "))       { String ssidStr       = str.substring(5);  ssidStr.toCharArray(eeprom.ssid, sizeof(eeprom.ssid)); }
   if (str.startsWith("pw "))         { String pwStr         = str.substring(3);  pwStr.toCharArray(eeprom.pw, sizeof(eeprom.pw)); }
-  if (str.startsWith("upperphref ")) { String upperphrefStr = str.substring(11); calibrate( upperphrefStr.toFloat(), 0.0 ); }
-  if (str.startsWith("lowerphref ")) { String lowerphrefStr = str.substring(11); calibrate( 0.0, lowerphrefStr.toFloat() ); }
+  if (str.startsWith("upperphref ")) { String upperphrefStr = str.substring(11); calibrateph( upperphrefStr.toFloat(), 0.0 ); }
+  if (str.startsWith("lowerphref ")) { String lowerphrefStr = str.substring(11); calibrateph( 0.0, lowerphrefStr.toFloat() ); }
   if (str.startsWith("phoffset "))   { String phoffsetStr   = str.substring(9);  eeprom.phoffset = phoffsetStr.toFloat(); }
+  if (str.startsWith("AUTOmode "))   { String AUTOmodeStr   = str.substring(9);  eeprom.AUTOmode = AUTOmodeStr.toInt(); }
+  if (str.startsWith("tankL "))      { String tankLStr      = str.substring(6);  eeprom.tankL = tankLStr.toFloat(); }
+  if (str.startsWith("Autophsetpoint ")) { String AutophsetpointStr = str.substring(11); eeprom.Autophsetpoint = AutophsetpointStr.toFloat(); }
+  if (str.startsWith("Automl "))     { String AutomlStr     = str.substring(8);  eeprom.Automl = AutomlStr.toFloat(); }
+  if (str.startsWith("Autodeadzone ")) { String AutodeadzoneStr = str.substring(13); eeprom.Autodeadzone = AutodeadzoneStr.toFloat(); }
+  if (str.startsWith("speed "))      { String speedStr      = str.substring(6);  eeprom.speed = speedStr.toInt(); }  //  TODO this should start pump calibrati
+  if (str.startsWith("pumpref "))    { String pumprefStr    = str.substring(8);  eeprom.pumpref = pumprefStr.toFloat(); }
   EEPROM.put(0, eeprom);    //  put updated values into eeprom
   Serial.println("eeprom vals, " + String(eeprom.ssid) + ", " + String(eeprom.upperanalogref) + ", " + String(eeprom.upperphref) + ", " + String(eeprom.loweranalogref) + ", " + String(eeprom.lowerphref));    //  echo eeprom DEBUG
 }
@@ -90,7 +114,7 @@ void setup() {
   
   analogReadResolution(14); // 10bit 1023, 12bit 4096, 14bit 16383
   pinMode(A0, INPUT);    //  A0 is ph value pin
-  calibrate();    //  calibrates with eeprom values here to give wifi some time to start this caluculate linear interpolation of reference values from eeprom
+  calibrateph();    //  calibrates with eeprom values here to give wifi some time to start this caluculate linear interpolation of reference values from eeprom
 
   mdns.begin(WiFi.localIP(), "ph");    //  setup mdns for ph.local
   mdns.addServiceRecord("Arduino mDNS ph Webserver._http", 80, MDNSServiceTCP);
@@ -135,7 +159,15 @@ void loop() {
           break;
         }
 
-        if (currentLine.endsWith("GET /AUTOstats")) {    //  aswer with json for AUTOstats
+        if (currentLine.endsWith("GET /pumpactive")) {    //  should only be hit while in Manual activate pump until Manual ml is zero
+
+        }
+
+        if (currentLine.endsWith("GET /pumpinactive")) {    //  should only be hit while in Manual stop pump and freeze Manual ml
+
+        }
+
+        if (currentLine.endsWith("GET /AUTOstats")) {    //  aswer with json for AUTOstats also set current mode to Auto
           float ph = 11.1;
           float tankL = 2.22;
           float Automl = 44.4;
@@ -155,7 +187,7 @@ void loop() {
           break;
         }
 
-        if (currentLine.endsWith("GET /MANUALstats")) {    //  aswer with json for MANUALstats
+        if (currentLine.endsWith("GET /MANUALstats")) {    //  aswer with json for MANUALstats also set current mode to Manual and stop pump
           float ph = 11.1;
           float tankL = 2.22;
           float Manualml = 44.4;
