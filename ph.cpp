@@ -138,73 +138,81 @@ void loop() {
       if (client.available()) {
         char c = client.read();
         Serial.write(c);  // if you've gotten to the end of the line (received a newline character) and the line is blank, the HTTP request has ended, so you can send a reply
-        if (c == '\n') {
-          if (currentLine.length() == 0) {
-            //if (c == '\n' && currentLineIsBlank) {
-            client.print(ph_html);    // serve html
+
+        if (c == '\n') {    //  end of line so check what client wants the following are all GETs since these are not saved in back history
+
+          if (currentLine.startsWith("GET /AUTOmode")) {    //  aswer with current mode
+            client.println("HTTP/1.1 200 OK");
+            client.println("Content-Type: text/plain");
+            client.println("Connection: close");
+            client.println();
+            client.print(AUTOmode);
             break;
-          } else {    // if you got a newline, then clear currentLine:
-            currentLine = "";
           }
-        } else if (c != '\r') {  // if you got anything else but a carriage return character,
-          currentLine += c;      // add it to the end of the currentLine
-        }
 
-        if (currentLine.endsWith("GET /AUTOmode")) {    //  aswer with current mode
-          client.println("HTTP/1.1 200 OK");
-          client.println("Content-Type: text/plain");
-          client.println("Connection: close");
-          client.println();
-          client.print(AUTOmode);
+          if (currentLine.startsWith("GET /pumpactive")) {    //  should only be hit while in Manual activate pump until Manual ml is zero
+            Serial.println(" GET /pumpactive ");
+            break;
+          }
+
+          if (currentLine.startsWith("GET /pumpinactive")) {    //  should only be hit while in Manual stop pump and freeze Manual ml
+            Serial.println(" GET /pumpinactive ");
+            break;
+          }
+
+          if (currentLine.startsWith("GET /AUTOstats")) {    //  aswer with json for AUTOstats also set current mode to Auto
+            float ph = 11.1;
+            float tankL = 2.22;
+            float Automl = 44.4;
+            uint8_t pumpactive = 0;
+            client.println("HTTP/1.1 200 OK");
+            client.println("Content-Type: application/json");
+            client.println("Connection: close");
+            client.println();
+            client.print("{\"ph\": ");          client.print(ph,2);
+            client.print(", \"tankL\": ");      client.print(tankL,2);
+            client.print(", \"ml\": ");         client.print(Automl,2);
+            client.print(", \"pumpactive\": "); client.print(pumpactive);
+            client.print("}");
+            break;
+          }
+
+          if (currentLine.startsWith("GET /MANUALstats")) {    //  aswer with json for MANUALstats also set current mode to Manual and stop pump
+            float ph = 11.1;
+            float tankL = 2.22;
+            float Manualml = 44.4;
+            uint8_t pumpactive = 0;
+            client.println("HTTP/1.1 200 OK");
+            client.println("Content-Type: application/json");
+            client.println("Connection: close");
+            client.println();
+            client.print("{\"ph\": ");          client.print(ph,2);
+            client.print(", \"tankL\": ");      client.print(tankL,2);
+            client.print(", \"ml\": ");         client.print(Manualml,2);
+            client.print(", \"pumpactive\": "); client.print(pumpactive);
+            client.print("}");
+            break;
+          }
+
+          if (currentLine.startsWith("GET /ow?")) {
+            String query = currentLine.substring(8, currentLine.indexOf(' ', 8));    //  the query is everything after 8 chars to the second space
+            client.println("HTTP/1.1 200 OK");
+            client.println("Content-Type: text/plain");
+            client.println("Connection: close");
+            client.println();
+            client.println("recieved overwrite " + query);
+            Serial.println("recieved overwrite " + query);
+            if (query.startsWith("speed")) Serial.println("speed overwrite");
+            break;
+          }
+
+          client.print(ph_html);    //  serve root for all cases where we did not break early
           break;
-        }
-
-        if (currentLine.endsWith("GET /pumpactive")) {    //  should only be hit while in Manual activate pump until Manual ml is zero
 
         }
 
-        if (currentLine.endsWith("GET /pumpinactive")) {    //  should only be hit while in Manual stop pump and freeze Manual ml
-
-        }
-
-        if (currentLine.endsWith("GET /AUTOstats")) {    //  aswer with json for AUTOstats also set current mode to Auto
-          float ph = 11.1;
-          float tankL = 2.22;
-          float Automl = 44.4;
-          uint8_t pumpactive = 0;
-          String payload =  String("{\"ph\": ")         + String(ph, 2)
-                         + String(", \"tankL\": ")      + String(tankL, 2)
-                         + String(", \"ml\": ")         + String(Automl, 2)
-                         + String(", \"pumpactive\": ") + String(pumpactive)
-                         + String("}");
-          client.println("HTTP/1.1 200 OK");
-          client.println("Content-Type: application/json");
-          client.print("Content-Length: ");
-          client.println(payload.length());
-          client.println("Connection: close");
-          client.println();
-          client.print(payload);
-          break;
-        }
-
-        if (currentLine.endsWith("GET /MANUALstats")) {    //  aswer with json for MANUALstats also set current mode to Manual and stop pump
-          float ph = 11.1;
-          float tankL = 2.22;
-          float Manualml = 44.4;
-          uint8_t pumpactive = 0;
-          String payload =  String("{\"ph\": ")         + String(ph, 2)
-                         + String(", \"tankL\": ")      + String(tankL, 2)
-                         + String(", \"ml\": ")         + String(Manualml, 2)
-                         + String(", \"pumpactive\": ") + String(pumpactive)
-                         + String("}");
-          client.println("HTTP/1.1 200 OK");
-          client.println("Content-Type: application/json");
-          client.print("Content-Length: ");
-          client.println(payload.length());
-          client.println("Connection: close");
-          client.println();
-          client.print(payload);
-          break;
+        if (c != '\r') {  // do not add \n or \r to currentLine string
+          currentLine += c;      // everything else add it to the end of the currentLine
         }
 
       }
