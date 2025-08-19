@@ -118,7 +118,6 @@ void loop() {
           if (currentLine.length() == 0) {
             //if (c == '\n' && currentLineIsBlank) {
             client.print(ph_html);    // serve html
-            Serial.println("sent page");
             break;
           } else {    // if you got a newline, then clear currentLine:
             currentLine = "";
@@ -173,13 +172,14 @@ void loop() {
           client.println("Connection: close");
           client.println();
           client.print(payload);
+          break;
         }
 
       }
     }
     //delay(1); // give the web browser time to receive the data
     client.stop();
-    Serial.println("client disconnected");
+    Serial.println(" client disconnected");
     Serial.println("");
   }
 }

@@ -223,17 +223,14 @@ The page should display data from an Arduino to the user and send User Input to 
 
 
 On first load the page should get the current mode from "GET /AUTOmode"
-The Arduino will responde with 1 for AUTO mode and 0 for MANUAL mode.
-The page should retrie GET /AUTOmode every second until the arudino responds.
-The site should continur Only after the arduino responded.
-
-
-The site should fetch stats in a set interval eg 1000ms from the Arduino.
-while in AUTO mode it shoudld "GET /AUTOstats"
-while in MANUAL mode it should "GET /MANUALstats"
-
-While the user is inputting anything into filed the page should stop fteching new data.
-When the user finished inputting into a filed the page should resume fteching either /AUTOstats or /MANUALstats depending on the current mode.
+The Arduino will responde:
+- with 1 for AUTO mode
+- with 0 for MANUAL mode
+When the Arduino respondes the site should then fetch stats in a set interval eg 1000ms from the Arduino:
+- while in AUTO mode it shoudld "GET /AUTOstats".
+- while in MANUAL mode it should "GET /MANUALstats".
+While the user is inputting anything into a filed the page should stop fteching new data.
+When the user finished inputting into a filed the page should resume fteching data.
 
 
 The Arduino will respond to "GET /AUTOstats" with json like this:
@@ -281,7 +278,7 @@ User input into the following fields while in MANUAL mode should be sent to thes
 - liters field is for endpoint /tankL. only non 0 values should be sent to the arduino
 - ml filed is for endpoint /Manualml. only non 0 values should be sent to the arudino
 - the water pistol emoji button is clickable in MANUAL mode (this already is working).
-  When the water pistol emoji button turns off/grey this should send a to endpoint "/pumpdinactive".
-  When the water pistol emoji button turns on/is coulored this should send to enpoint "/pumpactive".
+  When the water pistol emoji button turns off/grey this should send a call to endpoint "/pumpinactive".
+  When the water pistol emoji button turns on/is coulored this should send a call to enpoint "/pumpactive".
 
 
