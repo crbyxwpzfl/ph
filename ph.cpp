@@ -91,6 +91,71 @@ String calibratepump(float value) {
 }
 
 
+float pumpml(float ml){    //  TODO change this so we can pump mls baised on calibration value. 
+                            //  WHILE running/pumping this should return the mls wich are left to pump and the correct amount of tankL
+                            //  when done pumping this should update the eeprom value for tankL once not constantly
+                            //  add a stop functionality
+                            //  pumpml() should return the amount of ml left to pump later this is used to see if pump is running and to update manual pumped ml number
+                            //  perhaps add a power percentage to eeprom
+                            //  perhaps add stallguard detection
+
+  if (stepper_driver.isSetupAndCommunicating())
+  {    
+    bool hardware_disabled = stepper_driver.hardwareDisabled();
+    TMC2209::Settings settings = stepper_driver.getSettings();
+    TMC2209::Status status = stepper_driver.getStatus();
+    bool software_enabled = settings.software_enabled;
+    bool standstill = status.standstill;
+
+    if (hardware_disabled && !software_enabled) {
+      stepper_driver.enable();
+      delay(100);
+    }
+
+    Serial.println("setup and comms good."
+                  ". hw is " + String(hardware_disabled ? "disabled" : "enabled") + 
+                  ". sw is " + String(software_enabled ? "enabled" : "disabled") + 
+                  ". stepper is " + String(standstill ? "standstill" : "moving")  );
+
+    if (incoming == "stop") {  // dont send line endings
+      stepper_driver.moveAtVelocity(0); // stop stepper
+      stepper_driver.disable();  // Software Disable
+      Serial.println("stepper stopped.");
+      incoming = "";
+    }
+
+    if (incoming.startsWith("speed ") && !hardware_disabled && software_enabled) {
+      Serial.println("setting speed to " + String((int32_t)incoming.substring(6).toInt()) );
+      stepper_driver.moveAtVelocity((int32_t)incoming.substring(6).toInt());
+      incoming = "";
+    }
+
+    if (incoming.startsWith("power ")) {
+      Serial.println("setting power procent to " + String((int32_t)incoming.substring(6).toInt()) );
+      stepper_driver.moveAtVelocity(0); // stop stepper
+      stepper_driver.disable();  // Software Disable
+      stepper_driver.setRunCurrent((int32_t)incoming.substring(6).toInt());
+      stepper_driver.enable();
+      incoming = "";
+    }
+
+    return; // Exit early, loop() will be called again
+  }
+  
+
+  if (stepper_driver.isCommunicatingButNotSetup())
+  {
+    Serial.println("no setup but comms good. try again");
+    initstepper();
+    return; // Exit early, loop() will be called again
+  }
+
+
+  Serial.println("no comms. connect Vm then type 'start'");
+}
+
+
+
 String calibrateph(float trueph) {    //  overwrites referenc values and recalculates linear interpolation
   static float truepharr[2] = {0.0 , 0.0};
   static float analogarr[2] = {0.0 , 0.0};
@@ -141,8 +206,10 @@ void parseserial(String str) {    //  for user to overwrite eeprom struct
 
   if (str.startsWith("calibratepump "))      { String speedStr      = str.substring(6);  eeprom.speed = speedStr.toInt(); }  //  TODO this should start pump calibration
 
-  if (str.startsWith("calibrateph ")) {}    //  TODO this should start pump calibration
+
   if (str.startsWith("phoffset "))   { String phoffsetStr   = str.substring(9);  eeprom.phoffset = phoffsetStr.toFloat(); }
+  if (str.startsWith("calibrateph ")) {}    //  TODO this should start pump calibration
+
 
   // TODO perhaps add manual dispense here also
 
@@ -231,13 +298,28 @@ void loop() {
             break;
           }
 
+          if (currentLine.startsWith("GET /phsetpoint")) {    //  overwrite ph setpoint here should only be hit with non zero values
+            
+            break;
+          }
+
+          if (currentLine.startsWith("GET /tankL")) {    //  overwrite tank level here should only be hit with non zero values
+            
+            break;
+          }
+
+          if (currentLine.startsWith("GET /Manualml")) {    //  should only be hit while in Manual should only be hit with non zero values
+            
+            break;
+          }
+
           if (currentLine.startsWith("GET /pumpactive")) {    //  should only be hit while in Manual activate pump until Manual ml is zero
-            Serial.println(" GET /pumpactive ");
+            // actually start pumping the manualml like pumpml(Manualml)
             break;
           }
 
           if (currentLine.startsWith("GET /pumpinactive")) {    //  should only be hit while in Manual stop pump and freeze Manual ml
-            Serial.println(" GET /pumpinactive ");
+            // stopp pump imideatly with pumpml(0)
             break;
           }
 
@@ -245,19 +327,15 @@ void loop() {
             if (!eeprom.Auto) {
               lastAutopump = millis(); eeprom.Auto = 1;    //  reset Auto time and activate auto
             }
-            
-            float ph = 11.1;
-            float tankL = 2.22;
-            float Automl = 44.4;
-            uint8_t pumpactive = 0;
+
             client.println("HTTP/1.1 200 OK");
             client.println("Content-Type: application/json");
             client.println("Connection: close");
             client.println();
-            client.print("{\"ph\": ");          client.print(ph,2);
-            client.print(", \"tankL\": ");      client.print(tankL,2);
-            client.print(", \"ml\": ");         client.print(Automl,2);
-            client.print(", \"pumpactive\": "); client.print(pumpactive);
+            client.print("{\"ph\": ");          client.print(mess(),2);
+            client.print(", \"tankL\": ");      client.print(eeprom.tankL,2);
+            client.print(", \"ml\": ");         client.print(eeprom.Automl,2);
+            client.print(", \"pumpactive\": "); client.print(pumpml() ? 1 : 0);
             client.print("}");
             break;
           }
@@ -267,18 +345,14 @@ void loop() {
               eeprom.Auto = 0;    //  reset Auto time and deactivate auto
             }
 
-            float ph = 11.1;
-            float tankL = 2.22;
-            float Manualml = 44.4;
-            uint8_t pumpactive = 0;
             client.println("HTTP/1.1 200 OK");
             client.println("Content-Type: application/json");
             client.println("Connection: close");
             client.println();
-            client.print("{\"ph\": ");          client.print(ph,2);
-            client.print(", \"tankL\": ");      client.print(tankL,2);
-            client.print(", \"ml\": ");         client.print(Manualml,2);
-            client.print(", \"pumpactive\": "); client.print(pumpactive);
+            client.print("{\"ph\": ");          client.print(mess(),2);
+            client.print(", \"tankL\": ");      client.print(eeprom.tankL,2);
+            client.print(", \"ml\": ");         client.print(pumpml(),2);
+            client.print(", \"pumpactive\": "); client.print(pumpml() ? 1 : 0);
             client.print("}");
             break;
           }
@@ -291,6 +365,9 @@ void loop() {
             client.println();
             client.println("recieved overwrite " + query);
             if (query.startsWith("speed")) Serial.println("speed overwrite");
+
+            // TODO additionally add all the info of eeprom and current variables here
+
             break;
           }
 
