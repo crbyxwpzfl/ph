@@ -204,8 +204,8 @@ Connection: close
       let fetching = false;          // prevent overlapping fetches
       const POLL_INTERVAL = 1000;    // ms
       const endpoints = {
-        auto: { ph: '/trueph', liters: '/tankL', ml: '/Automl' },
-        manual: { ph: '/trueph', liters: '/tankL', ml: '/Manualml' }
+        auto: { ph: '/phsetpoint', liters: '/tankL', ml: '/Automl' },
+        manual: { ph: '/phsetpoint', liters: '/tankL', ml: '/Manualml' }
       };
 
       function currentModeKey() { return auto.classList.contains('active') ? 'auto' : 'manual'; }
@@ -220,7 +220,7 @@ Connection: close
 
       async function fetchModeAndStart() {
         try {
-          const r = await fetch('/AUTOmode', { cache: 'no-store' });
+          const r = await fetch('/Auto', { cache: 'no-store' });
           if (!r.ok) throw new Error('Mode HTTP ' + r.status);
           const text = (await r.text()).trim();
           const isAuto = text === '1';
@@ -238,7 +238,7 @@ Connection: close
           startPolling();
           fetchStats(); // immediate first fetch
         } catch (e) {
-          console.warn('Failed to fetch /AUTOmode:', e);
+          console.warn('Failed to fetch /Auto:', e);
           // Still start polling in case endpoint temporarily unavailable
           startPolling();
         }
@@ -256,7 +256,7 @@ Connection: close
         if (pollingPaused || fetching) return;
         fetching = true;
         const modeKey = currentModeKey();
-        const url = modeKey === 'auto' ? '/AUTOstats' : '/MANUALstats';
+        const url = modeKey === 'auto' ? '/AutoStats' : '/ManualStats';
         try {
           const r = await fetch(url, { cache: 'no-store' });
           if (!r.ok) throw new Error('Stats HTTP ' + r.status);
@@ -305,7 +305,7 @@ Connection: close
         const ep = endpointMap[fieldId];
         if (!ep) return;
         const floatVal = raw / (10 ** v);
-        // Assumption: Arduino expects value query param, e.g. /trueph?value=7.2
+        // Assumption: Arduino expects value query param, e.g. /phsetpoint?value=7.2
         fetch(`${ep}?value=${encodeURIComponent(floatVal)}`).catch(err => console.warn('Send failed', ep, err));
       }
 
