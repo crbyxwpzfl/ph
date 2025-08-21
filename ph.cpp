@@ -48,12 +48,13 @@ static inline bool msSince(uint32_t lasttime, uint32_t intervalms) {    //  help
 }
 
 
-void initpump() {
-  uint16_t Vm = analogRead(A3); Serial.print("Vm is " + String(Vm));
+String initpump() {
+  uint16_t Vm = analogRead(A3);
+  String response = String("Vm is " + String(Vm));
 
   if (Vm > 5000) {
     digitalWrite(4, HIGH);  // set Vio high
-    Serial.print(" so init pump");
+    response += " so init pump";
 
     Serial1.begin(115200);  // Start Serial1 on pins 0 (RX) and 1 (TX)
     stepper_driver.setup(serial_stream);
@@ -61,13 +62,17 @@ void initpump() {
     stepper_driver.setHardwareEnablePin(6);
     stepper_driver.setRunCurrent(90);    //  perhaps this should be in eeprom too
     stepper_driver.enableCoolStep();
-    stepper_driver.disable();
     stepper_driver.moveAtVelocity(0); // stop stepper
+    stepper_driver.disable();
 
-    Serial.println(" done pls wait for comms");
+    response += " try comms";
   } else {
-    Serial.println(" so abort");
+    return response + " so abort";    //  exit early
   }
+
+  if (stepper_driver.isSetupAndCommunicating()) return response + " and comms good hw " + (stepper_driver.hardwareDisabled() ? "enabled\n" : "disabled\n");
+  if (stepper_driver.isCommunicatingButNotSetup()) return response + " and comms good but no setup\n";
+  return response + " and no comms \n";
 }
 
 
@@ -82,14 +87,14 @@ String calibratepump(float value) {
     totalpumpms = pumpml(20.0);    //  pump 20ml and safe total pump time perhaps make this a setting in eeprom too
     
     firstcall = 0;    //  next call is not for speed
-    return ("pump will calibrate to " + String(eeprom.pumpspeed) + " pls wait for pump to stop then enter ml");    //  tell user to wait while pump is running
+    return ("pump will calibrate to " + String(eeprom.pumpspeed) + " pls wait for pump to stop then enter ml \n");    //  tell user to wait while pump is running
   }
 
   if (!firstcall) {    //  TODO check for pump still running here!!!!
     eeprom.pumpmsperml = (float)totalpumpms / value ;    //  calculate ms per ml
     firstcall = 1;    //  prep for next calibration
     EEPROM.put(0, eeprom);    //  put calculated ml per ms and corresponding speed into eeprom
-    return ("pump calibrated to " + String(eeprom.pumpmsperml) + " ml/ms");
+    return ("pump calibrated to " + String(eeprom.pumpmsperml) + " ml/ms \n");
   }
 }
 
@@ -152,7 +157,7 @@ uint32_t pumpml(float ml = -69.0){
 
   if (stepper_driver.isCommunicatingButNotSetup()) {    //  retry initialization here
     Serial.println("no setup but comms good. try again");
-    initstepper();
+    initpump();
     return 0;
   }
 
@@ -174,11 +179,11 @@ String calibrateph(float trueph) {    //  overwrites referenc values and recalcu
     eeprom.slope = (truepharr[0] - truepharr[1]) / (float)(analogarr[0] - analogarr[1]);
     eeprom.intercept = (float)truepharr[0] - eeprom.slope * analogarr[0];
   } else {
-    return ("first pair is " + String(truepharr[index]) + ", " + String(analogarr[index]) + " pls enter a second value");
+    return ("first pair is " + String(truepharr[index]) + ", " + String(analogarr[index]) + " pls enter a second value \n");
   }
 
   EEPROM.put(0, eeprom);    //  put calculated intercept and slope into eeprom
-  return ("ph calibrated to " + String(eeprom.slope, 10) + ", intercept " + String(eeprom.intercept));    //  echo calibration DEBUG
+  return ("ph calibrated to " + String(eeprom.slope, 10) + ", intercept " + String(eeprom.intercept) + "\n");    //  echo calibration DEBUG
 }
 
 
@@ -198,7 +203,9 @@ float mess(bool returnanalogvalue = false) {    //  messure analog voltage and c
 
 
 String parseserial(String query) {    //  for user to overwrite eeprom struct
+  String response = String("query " + query + "\n");
   query.trim();
+  
   if (query.startsWith("ssid "))  query.substring(5).toCharArray(eeprom.ssid, sizeof(eeprom.ssid));
   if (query.startsWith("pw "))    query.substring(3).toCharArray(eeprom.pw, sizeof(eeprom.pw));
 
@@ -209,20 +216,22 @@ String parseserial(String query) {    //  for user to overwrite eeprom struct
   if (query.startsWith("Automl "))         eeprom.Automl = query.substring(7).toFloat();
   if (query.startsWith("Autodeadzone "))   eeprom.Autodeadzone = query.substring(13).toFloat();
 
-  if (query.startsWith("calibratepump "))  Serial.println( calibratepump(query.substring(14).toFloat()) );    //  this expects first a speed value eg. 5000 to 40000 and then a ml value eg. 12.34
+  if (query.startsWith("calibratepump "))  response += calibratepump(query.substring(14).toFloat());    //  this expects first a speed value eg. 5000 to 40000 and then a ml value eg. 12.34
   if (query.startsWith("pumpspeed "))      eeprom.pumpspeed = query.substring(10).toFloat();
   if (query.startsWith("pumpmsperml "))    eeprom.pumpmsperml = query.substring(12).toFloat();
 
   if (query.startsWith("phoffset "))     eeprom.phoffset = query.substring(9).toFloat();
-  if (query.startsWith("calibrateph "))  Serial.println( calibrateph(query.substring(12).toFloat()) );    //  this expects two true ph value eg. 4.0 and 7.0
+  if (query.startsWith("calibrateph "))  response += calibrateph(query.substring(12).toFloat());    //  this expects two true ph value eg. 4.0 and 7.0
 
-  if (query.startsWith("pumpml "))  pumpml(query.substring(7).toFloat());    //  this expects a ml value eg. 12.34
+  if (query.startsWith("initpump "))  response += initpump();
+  if (query.startsWith("pumpml "))    pumpml(query.substring(7).toFloat());    //  this expects a ml value eg. 12.34
 
   EEPROM.put(0, eeprom);    //  put updated values into eeprom
 
-  return String(  "query " + query + "\n"
-                + "eeprom vals, \n"
+  response += String( "\nph " + String(mess()) + "\n"
+                + "eeprom vals, \n")
                 + "ssid " + String(eeprom.ssid) + "\n"
+            //  + "pw" + String(eeprom.pw) + "\n"
 
                 + "tankL " + String(eeprom.tankL) + "\n"
 
@@ -238,6 +247,11 @@ String parseserial(String query) {    //  for user to overwrite eeprom struct
                 + "phoffset " + String(eeprom.phoffset) + "\n"
                 + "slope " + String(eeprom.slope, 10) + "\n"
                 + "intercept " + String(eeprom.intercept, 10) + "\n"
+
+                + "pump info \n"
+                + "pump setup and comms " + (stepper_driver.isSetupAndCommunicating() ? "good" : "bad") + "\n"
+                + "pump just comms " + (stepper_driver.isCommunicatingButNotSetup() ? "good" : "bad") + "\n"
+                + "pump hardware " + (stepper_driver.hardwareDisabled() ? "disabled" : "enabled") + "\n"
                 );    //  echo eeprom for DEBUG
 }
 
@@ -289,6 +303,8 @@ void setup() {
   EEPROM.get(0, eeprom);    //  fetch current eeprom values and since eeprom is a global struct this updates the global struct
 
   initwifi();
+
+  Serial.println( initpump() );
 }
 
 void loop() {
