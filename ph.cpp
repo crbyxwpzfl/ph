@@ -28,12 +28,14 @@ struct{ char ssid[30];
         float tankL;    //  tank level in liters
 
         uint8_t Auto;    // is auto mode on or off
+        float Autodeadzone;    //  minimal ph diff to pump sth
         float Autophsetpoint;    //  ph set point
         float Automl;    //  amount in ml to pump for 0.1 ph diff
-        float Autodeadzone;    //  minimal ph diff to pump sth
+        float Manualml;    //  this is not neccessary to save but it is easyer to just have this in global struct aswell
+
 
         uint16_t pumpspeed;    //  motor speed
-        float pumpmlperms;    //  pump calibration value
+        float pumpmsperml;    //  pump calibration value
 
         float phoffset;    //  constant ph offset
         float slope;    //  slope of the calibration curve
@@ -72,32 +74,71 @@ void initpump() {
 
 String calibratepump(float value) {
   static uint8_t firstcall = 1;
+  
+  static uint32_t totalpumpms = 0; 
 
   if (firstcall) {    // on first call treat value as speed setting
     eeprom.pumpspeed = (uint32_t)value;    //  pump speed good values are somewhere around 5000 to 40000
 
     // TODO start pump here for a fixed time intervall remember to change the 20sec intervall below!!!!
+    totalpumpms = pumpml(20.0);    //  pump 20ml and safe total pump time
     
     firstcall = 0;    //  next call is not for speed
     return ("pump will calibrate to " + String(eeprom.pumpspeed) + " pls wait for pump to stop then enter ml");    //  tell user to wait while pump is running
   }
 
   if (!firstcall) {    //  TODO check for pump still running here!!!!
-    eeprom.pumpmlperms = value / 20000;    //  calculate ml per ms
+    eeprom.pumpmsperml = totalpumpms / value ;    //  calculate ms per ml
     firstcall = 1;    //  prep for next calibration
     EEPROM.put(0, eeprom);    //  put calculated ml per ms and corresponding speed into eeprom
-    return ("pump calibrated to " + String(eeprom.pumpmlperms) + " ml/ms");
+    return ("pump calibrated to " + String(eeprom.pumpmsperml) + " ml/ms");
   }
 }
 
 
-float pumpml(float ml){    //  TODO change this so we can pump mls baised on calibration value. 
+uint32_t pumpml(float ml = -69.0){    //  TODO change this so we can pump mls baised on calibration value. 
                             //  WHILE running/pumping this should return the mls wich are left to pump and the correct amount of tankL
                             //  when done pumping this should update the eeprom value for tankL once not constantly
                             //  add a stop functionality
                             //  pumpml() should return the amount of ml left to pump later this is used to see if pump is running and to update manual pumped ml number
                             //  perhaps add a power percentage to eeprom
                             //  perhaps add stallguard detection
+
+  static uint32_t pumpactivation = 0;    //  timestamp when pump was activated
+  static uint32_t totalpumpms = 0;    //  total time to pump in ms
+
+  if (ml > 99.9) {    //  consider a value of great than this as a fault TODO reconsider this perhaps this is stoopid since this can hardlock for a big ph diff
+    // TODO shut off pump to be safe here
+    return 0;    //  return pump off
+  }
+
+  //  TODO only do this when pump is running otherwise the msSince() causes problemis
+  if (ml < 0.0) {    //  this should only occur for periodical call so check current time against total pump time and perhaps stop pump
+    if (msSince(pumpactivation, totalpumpms)) {    //  when pump time is up stop pump
+      // TODO stop pump here
+      EEPROM.put(0, eeprom);    //  save current tankL here
+      return 0;    //  return pump off
+    } else {
+      // TODO recaluclate eeprom.Manualml
+      // TODO update tank level
+      return 1;    //  return pumping
+    }
+  }
+
+  if (!ml) {    //  when called with zero this should stop pump and reset Manualml
+    eeprom.Manualml = 0.0;    //  reset Manualml
+    // TODO shut off pump
+    return 0; //  return pump off
+  }
+
+  if (ml) {    //  when called with a value this should pump the amount
+    pumpactivation = millis();    //  save activation time stamp
+    totalpumpms = ml * eeprom.pumpmsperml;    //  calculate total pump time with pumpmsperml
+    // TODO activate pump
+    return totalpumpms;    //  return pump on
+  }
+
+
 
   if (stepper_driver.isSetupAndCommunicating())
   {    
@@ -270,13 +311,18 @@ void setup() {
 void loop() {
   if (Serial.available() > 0) parseserial(Serial.readString());    //  let user change eeprom via serial for debugging
 
-  mdns.run();    //  periodically run mdns
+  mdns.run();    //  periodically call mdns
 
   mess();    //  measure ph every loop
 
-  if (eeprom.Auto && msSince(lastAutopump, eeprom.Autointerval) && abs(mess() - eeprom.Autophsetpoint) > eeprom.Autodeadzone ) {    //  when in auto and its time for auto pump and ph diff is larger than deadzone
-    lastAutopump = millis();
-    Serial.println("Auto pump")
+  pumpml();    //  periodically call pump
+
+  if (eeprom.Auto && msSince(lastAutopump, eeprom.Autointerval)) {    //  when in auto and its time for auto pump
+    float phdiff = (float)(mess() - eeprom.Autophsetpoint)    //  calculate ph diff
+    if (phdiff > eeprom.Autodeadzone) {    //  only pump when ph diff is greater than the deadzone
+        lastAutopump = millis();
+        pumpml((float)(phdiff * 10.0f * eeprom.Automl));    //  calculate ml to pump phdiff times Automl per 0.1ph diff
+    }
   }
 
   WiFiClient client = server.available();  // listen for incoming clients
@@ -298,34 +344,43 @@ void loop() {
             break;
           }
 
-          if (currentLine.startsWith("GET /phsetpoint")) {    //  overwrite ph setpoint here should only be hit with non zero values
-            
+          if (currentLine.startsWith("GET /phsetpoint?value=")) {    //  overwrite ph setpoint here should only be hit with non zero values
+            eeprom.phsetpoint = currentLine.substring(22, currentLine.indexOf(' ', 22)).toFloat();
+            EEPROM.put(0, eeprom);    //  save new value
             break;
           }
 
-          if (currentLine.startsWith("GET /tankL")) {    //  overwrite tank level here should only be hit with non zero values
-            
+          if (currentLine.startsWith("GET /tankLevel?value=")) {    //  overwrite tank level here should only be hit with non zero values
+            eeprom.tankL = currentLine.substring(21, currentLine.indexOf(' ', 21)).toFloat();
+            EEPROM.put(0, eeprom);    //  save new value
             break;
           }
 
-          if (currentLine.startsWith("GET /Manualml")) {    //  should only be hit while in Manual should only be hit with non zero values
-            
+          if (currentLine.startsWith("GET /Automl?value=")) {    //  should only be hit while in Auto should only be hit with non zero values
+            eeprom.Automl = currentLine.substring(18, currentLine.indexOf(' ', 18)).toFloat();
+            EEPROM.put(0, eeprom);    //  save new value
+            break;
+          }
+
+          if (currentLine.startsWith("GET /Manualml?value=")) {    //  should only be hit while in Manual should only be hit with non zero values
+            eeprom.Manualml = currentLine.substring(20, currentLine.indexOf(' ', 20)).toFloat();    //  does not have to be saved Manualml is just for convenience in struct
             break;
           }
 
           if (currentLine.startsWith("GET /pumpactive")) {    //  should only be hit while in Manual activate pump until Manual ml is zero
-            // actually start pumping the manualml like pumpml(Manualml)
+            pumpml(eeprom.Manualml);    //  start pumping
             break;
           }
 
           if (currentLine.startsWith("GET /pumpinactive")) {    //  should only be hit while in Manual stop pump and freeze Manual ml
-            // stopp pump imideatly with pumpml(0)
+            pumpml(0.0);    //  stop pumping
             break;
           }
 
           if (currentLine.startsWith("GET /AutoStats")) {    //  aswer with json for AutoStats also set current mode to Auto
             if (!eeprom.Auto) {
               lastAutopump = millis(); eeprom.Auto = 1;    //  reset Auto time and activate auto
+              pumpml(0.0);    //  also stop pump on mode change
             }
 
             client.println("HTTP/1.1 200 OK");
@@ -334,7 +389,7 @@ void loop() {
             client.println();
             client.print("{\"ph\": ");          client.print(mess(),2);
             client.print(", \"tankL\": ");      client.print(eeprom.tankL,2);
-            client.print(", \"ml\": ");         client.print(eeprom.Automl,2);
+            client.print(", \"ml\": ");         client.print(eeprom.Automl,2);    //  constantly show Automl
             client.print(", \"pumpactive\": "); client.print(pumpml() ? 1 : 0);
             client.print("}");
             break;
@@ -343,6 +398,7 @@ void loop() {
           if (currentLine.startsWith("GET /ManualStats")) {    //  aswer with json for ManualStats also set current mode to Manual and stop pump
             if (eeprom.Auto) {
               eeprom.Auto = 0;    //  reset Auto time and deactivate auto
+              pumpml(0.0);    //  also stop pump on mode change
             }
 
             client.println("HTTP/1.1 200 OK");
@@ -351,7 +407,7 @@ void loop() {
             client.println();
             client.print("{\"ph\": ");          client.print(mess(),2);
             client.print(", \"tankL\": ");      client.print(eeprom.tankL,2);
-            client.print(", \"ml\": ");         client.print(pumpml(),2);
+            client.print(", \"ml\": ");         client.print(eeprom.Manualml,2);    //  show current Manualml left to pump
             client.print(", \"pumpactive\": "); client.print(pumpml() ? 1 : 0);
             client.print("}");
             break;
