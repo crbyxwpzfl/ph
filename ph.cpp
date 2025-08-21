@@ -33,7 +33,6 @@ struct{ char ssid[30];
         float Automl;    //  amount in ml to pump for 0.1 ph diff
         float Manualml;    //  this is not neccessary to save but it is easyer to just have this in global struct aswell
 
-
         uint16_t pumpspeed;    //  motor speed
         float pumpmsperml;    //  pump calibration value
 
@@ -60,7 +59,7 @@ void initpump() {
     stepper_driver.setup(serial_stream);
 
     stepper_driver.setHardwareEnablePin(6);
-    stepper_driver.setRunCurrent(10);
+    stepper_driver.setRunCurrent(90);    //  perhaps this should be in eeprom too
     stepper_driver.enableCoolStep();
     stepper_driver.disable();
     stepper_driver.moveAtVelocity(0); // stop stepper
@@ -80,15 +79,14 @@ String calibratepump(float value) {
   if (firstcall) {    // on first call treat value as speed setting
     eeprom.pumpspeed = (uint32_t)value;    //  pump speed good values are somewhere around 5000 to 40000
 
-    // TODO start pump here for a fixed time intervall remember to change the 20sec intervall below!!!!
-    totalpumpms = pumpml(20.0);    //  pump 20ml and safe total pump time
+    totalpumpms = pumpml(20.0);    //  pump 20ml and safe total pump time perhaps make this a setting in eeprom too
     
     firstcall = 0;    //  next call is not for speed
     return ("pump will calibrate to " + String(eeprom.pumpspeed) + " pls wait for pump to stop then enter ml");    //  tell user to wait while pump is running
   }
 
   if (!firstcall) {    //  TODO check for pump still running here!!!!
-    eeprom.pumpmsperml = totalpumpms / value ;    //  calculate ms per ml
+    eeprom.pumpmsperml = (float)totalpumpms / value ;    //  calculate ms per ml
     firstcall = 1;    //  prep for next calibration
     EEPROM.put(0, eeprom);    //  put calculated ml per ms and corresponding speed into eeprom
     return ("pump calibrated to " + String(eeprom.pumpmsperml) + " ml/ms");
@@ -96,105 +94,71 @@ String calibratepump(float value) {
 }
 
 
-uint32_t pumpml(float ml = -69.0){    //  TODO change this so we can pump mls baised on calibration value. 
-                            //  WHILE running/pumping this should return the mls wich are left to pump and the correct amount of tankL
-                            //  when done pumping this should update the eeprom value for tankL once not constantly
-                            //  add a stop functionality
-                            //  pumpml() should return the amount of ml left to pump later this is used to see if pump is running and to update manual pumped ml number
-                            //  perhaps add a power percentage to eeprom
-                            //  perhaps add stallguard detection
-
+uint32_t pumpml(float ml = -69.0){
   static uint32_t pumpactivation = 0;    //  timestamp when pump was activated
   static uint32_t totalpumpms = 0;    //  total time to pump in ms
+  static uint32_t lastpumpcall = 0;    //  timestamp of last pump call this is for recalculation of Manualml and tank level each call
 
-  if (ml > 99.9) {    //  consider a value of great than this as a fault TODO reconsider this perhaps this is stoopid since this can hardlock for a big ph diff
-    // TODO shut off pump to be safe here
-    return 0;    //  return pump off
-  }
-
-  //  TODO only do this when pump is running otherwise the msSince() causes problemis
-  if (ml < 0.0) {    //  this should only occur for periodical call so check current time against total pump time and perhaps stop pump
-    if (msSince(pumpactivation, totalpumpms)) {    //  when pump time is up stop pump
-      // TODO stop pump here
-      EEPROM.put(0, eeprom);    //  save current tankL here
-      return 0;    //  return pump off
-    } else {
-      // TODO recaluclate eeprom.Manualml
-      // TODO update tank level
-      return 1;    //  return pumping
-    }
-  }
-
-  if (!ml) {    //  when called with zero this should stop pump and reset Manualml
-    eeprom.Manualml = 0.0;    //  reset Manualml
-    // TODO shut off pump
-    return 0; //  return pump off
-  }
-
-  if (ml) {    //  when called with a value this should pump the amount
-    pumpactivation = millis();    //  save activation time stamp
-    totalpumpms = ml * eeprom.pumpmsperml;    //  calculate total pump time with pumpmsperml
-    // TODO activate pump
-    return totalpumpms;    //  return pump on
-  }
-
-
-
-  if (stepper_driver.isSetupAndCommunicating())
-  {    
+  if (stepper_driver.isSetupAndCommunicating()) {    //  check for pump setup and comms  perhpahs integrate stallguard here and add standstill detection
     bool hardware_disabled = stepper_driver.hardwareDisabled();
-    TMC2209::Settings settings = stepper_driver.getSettings();
-    TMC2209::Status status = stepper_driver.getStatus();
-    bool software_enabled = settings.software_enabled;
-    bool standstill = status.standstill;
 
-    if (hardware_disabled && !software_enabled) {
+    if (ml > 99.9) {    //  consider a value of great than this as a fault reconsider this perhaps this is stoopid since this can hardlock for a big ph diff
+
+      stepper_driver.moveAtVelocity(0);    // stop pump
+      stepper_driver.disable();    // disable pump
+
+      return 0;    //  return pump off
+    }
+
+    if (ml < 0.0) {    //  this should only occur for periodical call so check current time against total pump time and perhaps stop pump only when pumping otherwise the msSince perhaps causes problemi
+      if (hardware_disabled) return 0;    //  when pump off exit early nothing to do here
+      if (msSince(pumpactivation, totalpumpms)) {    //  when pump time is up and pump is active stop pump and save Manualml and tank level
+
+        stepper_driver.moveAtVelocity(0);    // stop pump
+        stepper_driver.disable();    // disable pump
+
+        eeprom.Manualml = 0.0;    //  reset Manualml
+        EEPROM.put(0, eeprom);    //  save current tank level here
+        return 0;    //  return pump off
+      }
+      if (!msSince(pumpactivation, totalpumpms)) {    //  when pump time is not up and pump is active recalc Manualml and tank level
+        uint32_t dt = (uint32_t)(millis() - lastpumpcall);    //  roleover safe calc elapsed ms
+        if (!eeprom.Auto) eeprom.Manualml = eeprom.Manualml - ( (float)(dt) / eeprom.pumpmsperml );    //  recalculate Manualml substract time since last call over msperml       // TODO consider negative values here
+        eeprom.tankL = eeprom.tankL -  ( ( (float)(dt) / eeprom.pumpmsperml ) * 0.001 );    //  recalculate tank level substract time since last call over msperml
+        lastpumpcall = millis();
+        return 1;    //  return pumping
+      }
+    }
+
+    if (!ml) {    //  when called with zero this should stop pump and freeze Manualml
+
+      stepper_driver.moveAtVelocity(0);    // stop pump
+      stepper_driver.disable();    // disable pump
+
+      EEPROM.put(0, eeprom);    //  save current tank level here
+      return 0; //  return pump off
+    }
+
+    if (ml) {    //  when called with a value this calcs the pump time and activates the pump
+      pumpactivation = lastpumpcall = millis();    //  save activation time stamp
+      totalpumpms = ml * eeprom.pumpmsperml;    //  calculate total pump time with pumpmsperml
+
       stepper_driver.enable();
-      delay(100);
+      stepper_driver.moveAtVelocity(eeprom.pumpspeed);
+
+      return totalpumpms;    //  return pump on
     }
-
-    Serial.println("setup and comms good."
-                  ". hw is " + String(hardware_disabled ? "disabled" : "enabled") + 
-                  ". sw is " + String(software_enabled ? "enabled" : "disabled") + 
-                  ". stepper is " + String(standstill ? "standstill" : "moving")  );
-
-    if (incoming == "stop") {  // dont send line endings
-      stepper_driver.moveAtVelocity(0); // stop stepper
-      stepper_driver.disable();  // Software Disable
-      Serial.println("stepper stopped.");
-      incoming = "";
-    }
-
-    if (incoming.startsWith("speed ") && !hardware_disabled && software_enabled) {
-      Serial.println("setting speed to " + String((int32_t)incoming.substring(6).toInt()) );
-      stepper_driver.moveAtVelocity((int32_t)incoming.substring(6).toInt());
-      incoming = "";
-    }
-
-    if (incoming.startsWith("power ")) {
-      Serial.println("setting power procent to " + String((int32_t)incoming.substring(6).toInt()) );
-      stepper_driver.moveAtVelocity(0); // stop stepper
-      stepper_driver.disable();  // Software Disable
-      stepper_driver.setRunCurrent((int32_t)incoming.substring(6).toInt());
-      stepper_driver.enable();
-      incoming = "";
-    }
-
-    return; // Exit early, loop() will be called again
   }
-  
 
-  if (stepper_driver.isCommunicatingButNotSetup())
-  {
+  if (stepper_driver.isCommunicatingButNotSetup()) {    //  retry initialization here
     Serial.println("no setup but comms good. try again");
     initstepper();
-    return; // Exit early, loop() will be called again
+    return 0;
   }
 
-
-  Serial.println("no comms. connect Vm then type 'start'");
+  Serial.println("no comms with pump");    //  this is bad this likly indicates wirering issue
+  return 0;
 }
-
 
 
 String calibrateph(float trueph) {    //  overwrites referenc values and recalculates linear interpolation
@@ -233,29 +197,48 @@ float mess(bool returnanalogvalue = false) {    //  messure analog voltage and c
 }
 
 
-void parseserial(String str) {    //  for user to overwrite eeprom struct
-  str.trim();
-  if (str.startsWith("ssid "))       { String ssidStr       = str.substring(5);  ssidStr.toCharArray(eeprom.ssid, sizeof(eeprom.ssid)); }
-  if (str.startsWith("pw "))         { String pwStr         = str.substring(3);  pwStr.toCharArray(eeprom.pw, sizeof(eeprom.pw)); }
+String parseserial(String query) {    //  for user to overwrite eeprom struct
+  query.trim();
+  if (query.startsWith("ssid "))  query.substring(5).toCharArray(eeprom.ssid, sizeof(eeprom.ssid));
+  if (query.startsWith("pw "))    query.substring(3).toCharArray(eeprom.pw, sizeof(eeprom.pw));
 
-  if (str.startsWith("tankL "))      { String tankLStr      = str.substring(6);  eeprom.tankL = tankLStr.toFloat(); }
+  if (query.startsWith("tankL ")) eeprom.tankL = query.substring(6).toFloat();
 
-  if (str.startsWith("Auto "))   { String AutoStr   = str.substring(9);  eeprom.Auto = AutoStr.toInt(); }
-  if (str.startsWith("Autophsetpoint ")) { String AutophsetpointStr = str.substring(11); eeprom.Autophsetpoint = AutophsetpointStr.toFloat(); }
-  if (str.startsWith("Automl "))     { String AutomlStr     = str.substring(8);  eeprom.Automl = AutomlStr.toFloat(); }
-  if (str.startsWith("Autodeadzone ")) { String AutodeadzoneStr = str.substring(13); eeprom.Autodeadzone = AutodeadzoneStr.toFloat(); }
+  if (query.startsWith("Auto "))           eeprom.Auto = query.substring(5).toInt();
+  if (query.startsWith("Autophsetpoint ")) eeprom.Autophsetpoint = query.substring(15).toFloat();
+  if (query.startsWith("Automl "))         eeprom.Automl = query.substring(7).toFloat();
+  if (query.startsWith("Autodeadzone "))   eeprom.Autodeadzone = query.substring(13).toFloat();
 
-  if (str.startsWith("calibratepump "))      { String speedStr      = str.substring(6);  eeprom.speed = speedStr.toInt(); }  //  TODO this should start pump calibration
+  if (query.startsWith("calibratepump "))  Serial.println( calibratepump(query.substring(14).toFloat()) );    //  this expects first a speed value eg. 5000 to 40000 and then a ml value eg. 12.34
+  if (query.startsWith("pumpspeed "))      eeprom.pumpspeed = query.substring(10).toFloat();
+  if (query.startsWith("pumpmsperml "))    eeprom.pumpmsperml = query.substring(12).toFloat();
 
+  if (query.startsWith("phoffset "))     eeprom.phoffset = query.substring(9).toFloat();
+  if (query.startsWith("calibrateph "))  Serial.println( calibrateph(query.substring(12).toFloat()) );    //  this expects two true ph value eg. 4.0 and 7.0
 
-  if (str.startsWith("phoffset "))   { String phoffsetStr   = str.substring(9);  eeprom.phoffset = phoffsetStr.toFloat(); }
-  if (str.startsWith("calibrateph ")) {}    //  TODO this should start pump calibration
-
-
-  // TODO perhaps add manual dispense here also
+  if (query.startsWith("pumpml "))  pumpml(query.substring(7).toFloat());    //  this expects a ml value eg. 12.34
 
   EEPROM.put(0, eeprom);    //  put updated values into eeprom
-  Serial.println("eeprom vals, " + String(eeprom.ssid) + ", " + String(eeprom.upperanalogref) + ", " + String(eeprom.upperphref) + ", " + String(eeprom.loweranalogref) + ", " + String(eeprom.lowerphref));    //  echo eeprom DEBUG
+
+  return String(  "query " + query + "\n"
+                + "eeprom vals, \n"
+                + "ssid " + String(eeprom.ssid) + "\n"
+
+                + "tankL " + String(eeprom.tankL) + "\n"
+
+                + "Auto " + String(eeprom.Auto) + "\n"
+                + "Autodeadzone " + String(eeprom.Autodeadzone) + "\n"
+                + "Autophsetpoint " + String(eeprom.Autophsetpoint) + "\n"
+                + "Automl " + String(eeprom.Automl) + "\n"
+                + "Manualml " + String(eeprom.Manualml) + "\n"
+
+                + "pumpspeed " + String(eeprom.pumpspeed) + "\n"
+                + "pumpmsperml " + String(eeprom.pumpmsperml, 4) + "\n"
+
+                + "phoffset " + String(eeprom.phoffset) + "\n"
+                + "slope " + String(eeprom.slope, 10) + "\n"
+                + "intercept " + String(eeprom.intercept, 10) + "\n"
+                );    //  echo eeprom for DEBUG
 }
 
 
@@ -281,7 +264,7 @@ void initwifi() {
     if (msSince(lastdot, 1000)) {
       lastdot = millis(); Serial.print(".");
     }
-    if (Serial.available() > 0) parseserial(Serial.readString());    //  let user change eeprom via serial while waiting for wifi
+    if (Serial.available() > 0) Serial.println( parseserial(Serial.readString()) );    //  let user change eeprom via serial while waiting for wifi
   }
   Serial.println("success" + "rssi " + String(WiFi.RSSI()) + "dBm");
 
@@ -309,7 +292,7 @@ void setup() {
 }
 
 void loop() {
-  if (Serial.available() > 0) parseserial(Serial.readString());    //  let user change eeprom via serial for debugging
+  if (Serial.available() > 0) Serial.println( parseserial(Serial.readString()) );    //  let user change eeprom via serial for debugging
 
   mdns.run();    //  periodically call mdns
 
@@ -321,7 +304,7 @@ void loop() {
     float phdiff = (float)(mess() - eeprom.Autophsetpoint)    //  calculate ph diff
     if (phdiff > eeprom.Autodeadzone) {    //  only pump when ph diff is greater than the deadzone
         lastAutopump = millis();
-        pumpml((float)(phdiff * 10.0f * eeprom.Automl));    //  calculate ml to pump phdiff times Automl per 0.1ph diff
+        pumpml( (float)( phdiff * eeprom.Automl * 10.0f ) );    //  calculate ml to pump phdiff times Automl per 0.1ph diff
     }
   }
 
@@ -379,7 +362,9 @@ void loop() {
 
           if (currentLine.startsWith("GET /AutoStats")) {    //  aswer with json for AutoStats also set current mode to Auto
             if (!eeprom.Auto) {
-              lastAutopump = millis(); eeprom.Auto = 1;    //  reset Auto time and activate auto
+              lastAutopump = millis();    //  reset Auto time
+              eeprom.Auto = 1;    //  set auto mode
+              EEPROM.put(0, eeprom);
               pumpml(0.0);    //  also stop pump on mode change
             }
 
@@ -397,7 +382,8 @@ void loop() {
 
           if (currentLine.startsWith("GET /ManualStats")) {    //  aswer with json for ManualStats also set current mode to Manual and stop pump
             if (eeprom.Auto) {
-              eeprom.Auto = 0;    //  reset Auto time and deactivate auto
+              eeprom.Auto = 0;    //  deactivate auto mode
+              EEPROM.put(0, eeprom);
               pumpml(0.0);    //  also stop pump on mode change
             }
 
@@ -414,16 +400,12 @@ void loop() {
           }
 
           if (currentLine.startsWith("GET /ow?")) {
-            String query = currentLine.substring(8, currentLine.indexOf(' ', 8));    //  the query is everything after 8 chars to the second space
             client.println("HTTP/1.1 200 OK");
             client.println("Content-Type: text/plain");
             client.println("Connection: close");
             client.println();
-            client.println("recieved overwrite " + query);
-            if (query.startsWith("speed")) Serial.println("speed overwrite");
-
-            // TODO additionally add all the info of eeprom and current variables here
-
+            client.println("recieved overwrite ");
+            client.println( parseserial( currentLine.substring(8, currentLine.indexOf(' ', 8)).replace("=", " ") ) );    // the query is everything after 8 chars to the second space
             break;
           }
 
