@@ -28,10 +28,12 @@ struct{ char ssid[30];
         float tankL;    //  tank level in liters
 
         uint8_t Auto;    // is auto mode on or off
+        uint32_t Autointervalms;    //  interval for auto mode cycles
         float Autodeadzone;    //  minimal ph diff to pump sth
         float Autophsetpoint;    //  ph set point
         float Automl;    //  amount in ml to pump for 0.1 ph diff
-        float Manualml;    //  this is not neccessary to save but it is easyer to just have this in global struct aswell
+        float Automaxml;    //  max ml for one pump cycle
+        float Manualml;    //  this is not neccessary to save but it is easier to just have this in global struct aswell
 
         uint16_t pumpspeed;    //  motor speed
         float pumpmsperml;    //  pump calibration value
@@ -73,29 +75,6 @@ String initpump() {
   if (stepper_driver.isSetupAndCommunicating()) return response + " and comms good hw " + (stepper_driver.hardwareDisabled() ? "enabled\n" : "disabled\n");
   if (stepper_driver.isCommunicatingButNotSetup()) return response + " and comms good but no setup\n";
   return response + " and no comms \n";
-}
-
-
-String calibratepump(float value) {
-  static uint8_t firstcall = 1;
-  
-  static uint32_t totalpumpms = 0; 
-
-  if (firstcall) {    // on first call treat value as speed setting
-    eeprom.pumpspeed = (uint32_t)value;    //  pump speed good values are somewhere around 5000 to 40000
-
-    totalpumpms = pumpml(20.0);    //  pump 20ml and safe total pump time perhaps make this a setting in eeprom too
-    
-    firstcall = 0;    //  next call is not for speed
-    return ("pump will calibrate to " + String(eeprom.pumpspeed) + " pls wait for pump to stop then enter ml \n");    //  tell user to wait while pump is running
-  }
-
-  if (!firstcall) {    //  TODO check for pump still running here!!!!
-    eeprom.pumpmsperml = (float)totalpumpms / value ;    //  calculate ms per ml
-    firstcall = 1;    //  prep for next calibration
-    EEPROM.put(0, eeprom);    //  put calculated ml per ms and corresponding speed into eeprom
-    return ("pump calibrated to " + String(eeprom.pumpmsperml) + " ml/ms \n");
-  }
 }
 
 
@@ -145,6 +124,8 @@ uint32_t pumpml(float ml = -69.0){
     }
 
     if (ml) {    //  when called with a value this calcs the pump time and activates the pump
+      if (eeprom.Auto && ml > eeprom.Automaxml) ml = eeprom.Automaxml;    //  cap ml while in Auto
+
       pumpactivation = lastpumpcall = millis();    //  save activation time stamp
       totalpumpms = ml * eeprom.pumpmsperml;    //  calculate total pump time with pumpmsperml
 
@@ -156,13 +137,51 @@ uint32_t pumpml(float ml = -69.0){
   }
 
   if (stepper_driver.isCommunicatingButNotSetup()) {    //  retry initialization here
-    Serial.println("no setup but comms good. try again");
+    Serial.println("no setup but comms good. try init again");
     initpump();
     return 0;
   }
 
   Serial.println("no comms with pump");    //  this is bad this likly indicates wirering issue
   return 0;
+}
+
+
+String calibratepump(float value) {
+  static uint8_t firstcall = 1;
+  static uint32_t totalpumpms = 0; 
+
+  if (firstcall) {    // on first call treat value as speed setting
+    eeprom.pumpspeed = (uint32_t)value;    //  pump speed good values are somewhere around 5000 to 40000
+
+    totalpumpms = pumpml(20.0);    //  pump 20ml and safe total pump time perhaps make this a setting in eeprom too
+    
+    firstcall = 0;    //  next call is not for speed
+    return ("pump will calibrate to " + String(eeprom.pumpspeed) + " pls wait for pump to stop then enter ml \n");    //  tell user to wait while pump is running
+  }
+
+  if (!firstcall) {    //  TODO check for pump still running here!!!!
+    eeprom.pumpmsperml = (float)totalpumpms / value ;    //  calculate ms per ml
+    firstcall = 1;    //  prep for next calibration
+    EEPROM.put(0, eeprom);    //  put calculated ml per ms and corresponding speed into eeprom
+    return ("pump calibrated to " + String(eeprom.pumpmsperml) + " ml/ms \n");
+  }
+  return ("pump calibration error \n");    //  this is to please compiler
+}
+
+
+float mess(bool returnanalogvalue = false) {    //  messure analog voltage and convert to ph with continous mean, 100 is the count of messvals used for mean calculation
+  static uint16_t index = 0;
+  static uint16_t messvals[100] = {};    // switch to fixed size array to simplify
+  float analogmean = 0.0;    //  reset mean of readings and recalculate mean
+
+  messvals[index] = analogRead(A0);    //  read one value into messvals
+  index = (index + 1) % 100;    //  increment index of messvals or reset index to 0
+
+  for (int i=0; i<100; i++) analogmean += messvals[i];
+  analogmean /= (float)100;
+  float ph = (eeprom.slope * analogmean ) + eeprom.intercept + eeprom.phoffset;    //  convert mean of analog readings to ph
+  return returnanalogvalue ? analogmean : ph;
 }
 
 
@@ -179,26 +198,11 @@ String calibrateph(float trueph) {    //  overwrites referenc values and recalcu
     eeprom.slope = (truepharr[0] - truepharr[1]) / (float)(analogarr[0] - analogarr[1]);
     eeprom.intercept = (float)truepharr[0] - eeprom.slope * analogarr[0];
   } else {
-    return ("first pair is " + String(truepharr[index]) + ", " + String(analogarr[index]) + " pls enter a second value \n");
+    return ("first pair is " + String(truepharr[0]) + ", " + String(analogarr[0]) + " pls enter a second value \n");
   }
 
   EEPROM.put(0, eeprom);    //  put calculated intercept and slope into eeprom
   return ("ph calibrated to " + String(eeprom.slope, 10) + ", intercept " + String(eeprom.intercept) + "\n");    //  echo calibration DEBUG
-}
-
-
-float mess(bool returnanalogvalue = false) {    //  messure analog voltage and convert to ph with continous mean, 100 is the count of messvals used for mean calculation
-  static uint16_t index = 0;
-  static uint16_t messvals[100] = {};    // switch to fixed size array to simplify
-  float analogmean = 0.0;    //  reset mean of readings and recalculate mean
-
-  messvals[index] = analogRead(A0);    //  read one value into messvals
-  index = (index + 1) % 100;    //  increment index of messvals or reset index to 0
-
-  for (int i=0; i<100; i++) analogmean += messvals[i];
-  analogmean /= (float)100;
-  ph = (eeprom.slope * analogmean ) + eeprom.intercept + eeprom.phoffset;    //  convert mean of analog readings to ph
-  return returnanalogvalue ? analogmean : ph;
 }
 
 
@@ -212,9 +216,12 @@ String parseserial(String query) {    //  for user to overwrite eeprom struct
   if (query.startsWith("tankL ")) eeprom.tankL = query.substring(6).toFloat();
 
   if (query.startsWith("Auto "))           eeprom.Auto = query.substring(5).toInt();
+  if (query.startsWith("Autointervalms ")) eeprom.Autointervalms = query.substring(15).toInt();
+  if (query.startsWith("Autodeadzone "))   eeprom.Autodeadzone = query.substring(13).toFloat();
   if (query.startsWith("Autophsetpoint ")) eeprom.Autophsetpoint = query.substring(15).toFloat();
   if (query.startsWith("Automl "))         eeprom.Automl = query.substring(7).toFloat();
-  if (query.startsWith("Autodeadzone "))   eeprom.Autodeadzone = query.substring(13).toFloat();
+  if (query.startsWith("Automaxml "))      eeprom.Automaxml = query.substring(10).toFloat();
+  if (query.startsWith("Manualml "))       eeprom.Manualml = query.substring(9).toFloat();
 
   if (query.startsWith("calibratepump "))  response += calibratepump(query.substring(14).toFloat());    //  this expects first a speed value eg. 5000 to 40000 and then a ml value eg. 12.34
   if (query.startsWith("pumpspeed "))      eeprom.pumpspeed = query.substring(10).toFloat();
@@ -226,19 +233,22 @@ String parseserial(String query) {    //  for user to overwrite eeprom struct
   if (query.startsWith("initpump "))  response += initpump();
   if (query.startsWith("pumpml "))    pumpml(query.substring(7).toFloat());    //  this expects a ml value eg. 12.34
 
-  EEPROM.put(0, eeprom);    //  put updated values into eeprom
+  EEPROM.put(0, eeprom);    //  put new values into eeprom
 
   response += String( "\nph " + String(mess()) + "\n"
-                + "eeprom vals, \n")
+                + "analog " + String(mess(true)) + "\n"
+                + "------ eeprom vals ------\n"
                 + "ssid " + String(eeprom.ssid) + "\n"
             //  + "pw" + String(eeprom.pw) + "\n"
 
                 + "tankL " + String(eeprom.tankL) + "\n"
 
                 + "Auto " + String(eeprom.Auto) + "\n"
+                + "Autointervalms " + String(eeprom.Autointervalms) + "\n"
                 + "Autodeadzone " + String(eeprom.Autodeadzone) + "\n"
                 + "Autophsetpoint " + String(eeprom.Autophsetpoint) + "\n"
                 + "Automl " + String(eeprom.Automl) + "\n"
+                + "Automaxml " + String(eeprom.Automaxml) + "\n"
                 + "Manualml " + String(eeprom.Manualml) + "\n"
 
                 + "pumpspeed " + String(eeprom.pumpspeed) + "\n"
@@ -248,11 +258,12 @@ String parseserial(String query) {    //  for user to overwrite eeprom struct
                 + "slope " + String(eeprom.slope, 10) + "\n"
                 + "intercept " + String(eeprom.intercept, 10) + "\n"
 
-                + "pump info \n"
+                + "------ pump info ------\n"
                 + "pump setup and comms " + (stepper_driver.isSetupAndCommunicating() ? "good" : "bad") + "\n"
                 + "pump just comms " + (stepper_driver.isCommunicatingButNotSetup() ? "good" : "bad") + "\n"
                 + "pump hardware " + (stepper_driver.hardwareDisabled() ? "disabled" : "enabled") + "\n"
                 );    //  echo eeprom for DEBUG
+  return response;
 }
 
 
@@ -280,7 +291,7 @@ void initwifi() {
     }
     if (Serial.available() > 0) Serial.println( parseserial(Serial.readString()) );    //  let user change eeprom via serial while waiting for wifi
   }
-  Serial.println("success" + "rssi " + String(WiFi.RSSI()) + "dBm");
+  Serial.println("success rssi " + String(WiFi.RSSI()) + "dBm");
 
   server.begin();
   Serial.println("webserver is up");
@@ -316,8 +327,9 @@ void loop() {
 
   pumpml();    //  periodically call pump
 
-  if (eeprom.Auto && msSince(lastAutopump, eeprom.Autointerval)) {    //  when in auto and its time for auto pump
-    float phdiff = (float)(mess() - eeprom.Autophsetpoint)    //  calculate ph diff
+  static uint32_t lastAutopump = 0;    //  timestamp of last auto pump
+  if (eeprom.Auto && msSince(lastAutopump, eeprom.Autointervalms)) {    //  when in auto and its time for auto pump
+    float phdiff = (float)(mess() - eeprom.Autophsetpoint);    //  calculate ph diff
     if (phdiff > eeprom.Autodeadzone) {    //  only pump when ph diff is greater than the deadzone
         lastAutopump = millis();
         pumpml( (float)( phdiff * eeprom.Automl * 10.0f ) );    //  calculate ml to pump phdiff times Automl per 0.1ph diff
@@ -344,7 +356,7 @@ void loop() {
           }
 
           if (currentLine.startsWith("GET /phsetpoint?value=")) {    //  overwrite ph setpoint here should only be hit with non zero values
-            eeprom.phsetpoint = currentLine.substring(22, currentLine.indexOf(' ', 22)).toFloat();
+            eeprom.Autophsetpoint = currentLine.substring(22, currentLine.indexOf(' ', 22)).toFloat();
             EEPROM.put(0, eeprom);    //  save new value
             break;
           }
@@ -415,13 +427,16 @@ void loop() {
             break;
           }
 
-          if (currentLine.startsWith("GET /ow?")) {
+          if (currentLine.startsWith("GET /serial?")) {
+            String query = currentLine.substring(12, currentLine.indexOf(' ', 12));    //  everything after "...?" to the second space is the query
+            query.replace("=", " ");    //  alltogether make eg "GET /serial?pumpspeed=10000 HTTP/1.1" to "pumpspeed 10000" and pass this to parseserial()
+
             client.println("HTTP/1.1 200 OK");
             client.println("Content-Type: text/plain");
             client.println("Connection: close");
             client.println();
             client.println("recieved overwrite ");
-            client.println( parseserial( currentLine.substring(8, currentLine.indexOf(' ', 8)).replace("=", " ") ) );    // the query is everything after 8 chars to the second space
+            client.println( parseserial( query ) );    // the query is everything after 8 chars to the second space
             break;
           }
 
