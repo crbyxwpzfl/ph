@@ -202,6 +202,8 @@
         auto: { ph: '/phsetpoint', liters: '/tankL', ml: '/Automl' },
         manual: { ph: '/phsetpoint', liters: '/tankL', ml: '/Manualml' }
       };
+  // Track last value (raw) we actually transmitted per field to avoid duplicates
+  const lastSent = { ph: null, liters: null, ml: null };
 
       function currentModeKey() { return auto.classList.contains('active') ? 'auto' : 'manual'; }
 
@@ -295,13 +297,21 @@
 
       function sendFieldValue(fieldId, raw, z, v) {
         if (!raw) return; // skip zero
+        // De-duplicate: if same raw value already sent for this field while in current mode, skip
+        if (lastSent[fieldId] === raw) return;
         const modeKey = currentModeKey();
         const endpointMap = endpoints[modeKey];
         const ep = endpointMap[fieldId];
         if (!ep) return;
         const floatVal = raw / (10 ** v);
         // Assumption: Arduino expects value query param, e.g. /phsetpoint?value=7.2
-        fetch(`${ep}?value=${encodeURIComponent(floatVal)}`).catch(err => console.warn('Send failed', ep, err));
+        lastSent[fieldId] = raw;
+        fetch(`${ep}?value=${encodeURIComponent(floatVal)}`)
+          .then(()=>{
+            // Optional debug log; comment out if not needed
+            // console.log('Sent', fieldId, 'raw', raw, 'float', floatVal);
+          })
+          .catch(err => console.warn('Send failed', ep, err));
       }
 
       function updateInputs() {
