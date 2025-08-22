@@ -142,7 +142,7 @@ uint32_t pumpml(float ml = -69.0){
     return 0;
   }
 
-  Serial.println("no comms with pump");    //  this is bad this likly indicates wirering issue
+  //Serial.println("no comms with pump");    //  this is bad this likly indicates wirering issue
   return 0;
 }
 
@@ -346,12 +346,12 @@ void loop() {
 
         if (c == '\n') {    //  end of line so check what client wants the following are all GETs since these are not saved in back history
 
-          if (currentLine.startsWith("GET /Auto")) {    //  aswer with current mode
+          if (currentLine.startsWith("GET /mode")) {    //  aswer with current mode
             client.println("HTTP/1.1 200 OK");
             client.println("Content-Type: text/plain");
             client.println("Connection: close");
             client.println();
-            client.print(eeprom.Auto);
+            client.print(String(eeprom.Auto));
             break;
           }
 
@@ -361,8 +361,8 @@ void loop() {
             break;
           }
 
-          if (currentLine.startsWith("GET /tankLevel?value=")) {    //  overwrite tank level here should only be hit with non zero values
-            eeprom.tankL = currentLine.substring(21, currentLine.indexOf(' ', 21)).toFloat();
+          if (currentLine.startsWith("GET /tankL?value=")) {    //  overwrite tank level here should only be hit with non zero values
+            eeprom.tankL = currentLine.substring(17, currentLine.indexOf(' ', 17)).toFloat();
             EEPROM.put(0, eeprom);    //  save new value
             break;
           }

@@ -220,7 +220,7 @@ Connection: close
 
       async function fetchModeAndStart() {
         try {
-          const r = await fetch('/Auto', { cache: 'no-store' });
+          const r = await fetch('/mode', { cache: 'no-store' });
           if (!r.ok) throw new Error('Mode HTTP ' + r.status);
           const text = (await r.text()).trim();
           const isAuto = text === '1';
@@ -238,7 +238,7 @@ Connection: close
           startPolling();
           fetchStats(); // immediate first fetch
         } catch (e) {
-          console.warn('Failed to fetch /Auto:', e);
+          console.warn('Failed to fetch /mode:', e);
           // Still start polling in case endpoint temporarily unavailable
           startPolling();
         }
