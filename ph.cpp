@@ -35,6 +35,7 @@ struct{ char ssid[30];
         float Automaxml;    //  max ml for one pump cycle
         float Manualml;    //  this is not neccessary to save but it is easier to just have this in global struct aswell
 
+        uint8_t cw;    //  1 is clockwise or 0 is counterclockwise rotation of pump 
         uint16_t pumpspeed;    //  motor speed
         float pumpmsperml;    //  pump calibration value
 
@@ -65,6 +66,7 @@ String initpump() {
     stepper_driver.setRunCurrent(90);    //  perhaps this should be in eeprom too
     stepper_driver.enableCoolStep();
     stepper_driver.moveAtVelocity(0); // stop stepper
+    eeprom.cw ? stepper_driver.enableInverseMotorDirection() : stepper_driver.disableInverseMotorDirection();
     stepper_driver.disable();
 
     response += " try comms";
@@ -130,6 +132,7 @@ uint32_t pumpml(float ml = -69.0){
       totalpumpms = ml * eeprom.pumpmsperml;    //  calculate total pump time with pumpmsperml
 
       stepper_driver.enable();
+      eeprom.cw ? stepper_driver.enableInverseMotorDirection() : stepper_driver.disableInverseMotorDirection();
       stepper_driver.moveAtVelocity(eeprom.pumpspeed);
 
       return totalpumpms;    //  return pump on
@@ -223,6 +226,7 @@ String parseserial(String query) {    //  for user to overwrite eeprom struct
   if (query.startsWith("Automaxml "))      eeprom.Automaxml = query.substring(10).toFloat();
   if (query.startsWith("Manualml "))       eeprom.Manualml = query.substring(9).toFloat();
 
+  if (query.startsWith("cw "))             eeprom.cw = query.substring(3).toInt();
   if (query.startsWith("calibratepump "))  response += calibratepump(query.substring(14).toFloat());    //  this expects first a speed value eg. 5000 to 40000 and then a ml value eg. 12.34
   if (query.startsWith("pumpspeed "))      eeprom.pumpspeed = query.substring(10).toFloat();
   if (query.startsWith("pumpmsperml "))    eeprom.pumpmsperml = query.substring(12).toFloat();
@@ -251,6 +255,7 @@ String parseserial(String query) {    //  for user to overwrite eeprom struct
                 + "Automaxml " + String(eeprom.Automaxml) + "\n"
                 + "Manualml " + String(eeprom.Manualml) + "\n"
 
+                + "cw " + String(eeprom.cw) + "\n"
                 + "pumpspeed " + String(eeprom.pumpspeed) + "\n"
                 + "pumpmsperml " + String(eeprom.pumpmsperml, 4) + "\n"
 
